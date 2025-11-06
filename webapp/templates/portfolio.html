@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Management - AEA JOE Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/portfolio.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Portfolio Management</h1>
+            <nav class="main-nav">
+                <a href="{{ url_for('index') }}" class="nav-link">← Back to Jobs</a>
+            </nav>
+        </header>
+
+        <div class="portfolio-section">
+            <div class="section-header">
+                <h2>Portfolio Files</h2>
+                <p class="section-description">Manage your job market materials (CV, research statement, teaching statement)</p>
+            </div>
+
+            <div class="portfolio-status" id="portfolioStatus">
+                <div class="status-item">
+                    <span class="status-label">Portfolio Path:</span>
+                    <span class="status-value" id="portfolioPath">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Combined Text Length:</span>
+                    <span class="status-value" id="combinedTextLength">-</span>
+                </div>
+            </div>
+
+            <div class="files-list" id="filesList">
+                <div class="loading">Loading portfolio files...</div>
+            </div>
+
+            <div class="upload-section">
+                <h3>Upload New File</h3>
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="upload-controls">
+                        <input type="file" id="fileInput" name="file" accept=".pdf,.doc,.docx,.txt" required>
+                        <select id="targetFilename" name="target_filename">
+                            <option value="">Use original filename</option>
+                            <option value="cv.pdf">cv.pdf</option>
+                            <option value="research_statement.pdf">research_statement.pdf</option>
+                            <option value="teaching_statement.pdf">teaching_statement.pdf</option>
+                        </select>
+                        <button type="submit" id="uploadButton" class="btn-upload">Upload</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/portfolio.js') }}"></script>
+</body>
+</html>
+

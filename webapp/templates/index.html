@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEA JOE Job Postings Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AEA JOE Job Postings Dashboard</h1>
+            <nav class="main-nav">
+                <a href="{{ url_for('portfolio_page') }}" class="nav-link">Portfolio Management →</a>
+            </nav>
+            <div class="stats-summary" id="statsSummary">
+                <div class="stat-item">
+                    <span class="stat-label">Total Jobs:</span>
+                    <span class="stat-value" id="statTotal">-</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">New:</span>
+                    <span class="stat-value" id="statNew">-</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Applied:</span>
+                    <span class="stat-value" id="statApplied">-</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Avg Fit Score:</span>
+                    <span class="stat-value" id="statAvgScore">-</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="controls">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="filterStatus">Status:</label>
+                    <select id="filterStatus">
+                        <option value="">All</option>
+                        <option value="new">New</option>
+                        <option value="applied">Applied</option>
+                        <option value="expired">Expired</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filterField">Field:</label>
+                    <select id="filterField">
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filterLevel">Level:</label>
+                    <select id="filterLevel">
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="filterMinScore">Min Fit Score:</label>
+                    <input type="number" id="filterMinScore" min="0" max="100" step="1" placeholder="0">
+                </div>
+            </div>
+            <div class="search-group">
+                <input type="text" id="searchInput" placeholder="Search jobs...">
+                <button id="clearFilters">Clear Filters</button>
+                <button id="scrapeButton" class="btn-scrape">Scrape New Jobs</button>
+                <button id="processButton" class="btn-process">Process with LLM</button>
+            </div>
+            <div class="edit-controls" id="editControls" style="display: none;">
+                <button id="saveButton" class="btn-save">Save Changes</button>
+                <button id="cancelEditButton" class="btn-cancel">Cancel</button>
+                <span id="editStatus" class="edit-status"></span>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table id="jobsTable">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="fit_score">Fit Score</th>
+                        <th class="sortable" data-sort="title">Title</th>
+                        <th class="sortable" data-sort="institution">Institution</th>
+                        <th>Field</th>
+                        <th>Level</th>
+                        <th class="sortable" data-sort="deadline">Deadline</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                        <th>Link</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="jobsTableBody">
+                    <tr>
+                        <td colspan="10" class="loading">Loading jobs...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div id="jobDetailsModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2 id="modalTitle">Job Details</h2>
+                <div id="modalBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+

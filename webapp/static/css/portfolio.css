@@ -1,0 +1,275 @@
+/* Portfolio Management Page Styles */
+
+.main-nav {
+    margin-top: 20px;
+}
+
+.nav-link {
+    color: white;
+    text-decoration: none;
+    font-size: 0.95em;
+    padding: 8px 15px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    transition: background-color 0.3s;
+}
+
+.nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.portfolio-section {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.section-header {
+    margin-bottom: 25px;
+}
+
+.section-header h2 {
+    color: #667eea;
+    margin-bottom: 10px;
+}
+
+.section-description {
+    color: #666;
+    font-size: 0.95em;
+}
+
+.portfolio-status {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+    margin-bottom: 30px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.status-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.status-label {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.status-value {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #333;
+}
+
+.files-list {
+    margin-bottom: 30px;
+}
+
+.file-card {
+    background: #f8f9fa;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: border-color 0.3s;
+}
+
+.file-card:hover {
+    border-color: #667eea;
+}
+
+.file-card.missing {
+    border-color: #fbbf24;
+    background-color: #fef3c7;
+}
+
+.file-card.exists {
+    border-color: #10b981;
+    background-color: #d1fae5;
+}
+
+.file-info {
+    flex: 1;
+}
+
+.file-name {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.file-details {
+    display: flex;
+    gap: 20px;
+    font-size: 0.9em;
+    color: #666;
+}
+
+.file-status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    font-weight: 500;
+    margin-top: 8px;
+}
+
+.status-missing {
+    background-color: #fbbf24;
+    color: #92400e;
+}
+
+.status-exists {
+    background-color: #10b981;
+    color: #065f46;
+}
+
+.file-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-file {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-view {
+    background-color: #667eea;
+    color: white;
+}
+
+.btn-view:hover {
+    background-color: #5568d3;
+}
+
+.btn-delete {
+    background-color: #ef4444;
+    color: white;
+}
+
+.btn-delete:hover {
+    background-color: #dc2626;
+}
+
+.upload-section {
+    margin-top: 30px;
+    padding-top: 30px;
+    border-top: 2px solid #e5e7eb;
+}
+
+.upload-section h3 {
+    color: #667eea;
+    margin-bottom: 15px;
+}
+
+.upload-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+#fileInput {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px;
+    border: 2px dashed #667eea;
+    border-radius: 5px;
+    background-color: #f8f9fa;
+    cursor: pointer;
+}
+
+#targetFilename {
+    padding: 10px 15px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    font-size: 0.95em;
+    min-width: 200px;
+}
+
+.btn-upload {
+    padding: 10px 25px;
+    background-color: #10b981;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: 500;
+    transition: background-color 0.3s;
+}
+
+.btn-upload:hover {
+    background-color: #059669;
+}
+
+.btn-upload:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+}
+
+.error-message {
+    background-color: #fee2e2;
+    color: #991b1b;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.success-message {
+    background-color: #d1fae5;
+    color: #065f46;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .file-card {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .file-actions {
+        width: 100%;
+        margin-top: 15px;
+    }
+    
+    .file-actions .btn-file {
+        flex: 1;
+    }
+    
+    .upload-controls {
+        flex-direction: column;
+    }
+    
+    #fileInput,
+    #targetFilename,
+    .btn-upload {
+        width: 100%;
+    }
+}
+
