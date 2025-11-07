@@ -114,6 +114,26 @@ header h1 {
 .search-group {
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.force-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85em;
+    color: #4b5563;
+    padding: 6px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background-color: #f9fafb;
+}
+
+.force-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
 }
 
 .bulk-actions {
@@ -333,6 +353,32 @@ table td ul li {
 }
 
 #processButton.processing {
+    background-color: #f59e0b;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+#matchButton {
+    padding: 10px 20px;
+    background-color: #8b5cf6;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.95em;
+    transition: background-color 0.3s;
+    font-weight: 500;
+}
+
+#matchButton:hover {
+    background-color: #7c3aed;
+}
+
+#matchButton:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+}
+
+#matchButton.processing {
     background-color: #f59e0b;
     animation: pulse 1.5s ease-in-out infinite;
 }
@@ -574,6 +620,11 @@ td.loading {
     text-transform: capitalize;
 }
 
+.status-pending {
+    background-color: #fbbf24;
+    color: #92400e;
+}
+
 .status-new {
     background-color: #3b82f6;
     color: white;
@@ -617,6 +668,36 @@ td.loading {
 .fit-score-low {
     background-color: #fee2e2;
     color: #991b1b;
+}
+
+.difficulty-chip {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 0.85em;
+    font-weight: 600;
+    min-width: 60px;
+    text-align: center;
+}
+
+.difficulty-high {
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+.difficulty-medium {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.difficulty-low {
+    background-color: #d1fae5;
+    color: #065f46;
+}
+
+.difficulty-unknown {
+    background-color: #e5e7eb;
+    color: #374151;
 }
 
 /* Actions */

@@ -1,15 +1,17 @@
 """Flask web application for visualizing job postings."""
 
 import logging
+import hashlib
+from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_file, redirect, url_for
 from werkzeug.utils import secure_filename
 from pathlib import Path
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 
 from database import (
     get_all_jobs, get_job, update_job, init_database,
-    add_job, mark_expired, create_backup_if_changed
+    add_job, mark_expired, create_backup_if_changed, needs_llm_processing, needs_fit_recompute
 )
 from scraper import download_job_data, parse_job_listings
 from processor import (
@@ -20,8 +22,13 @@ from processor import (
     parse_deadlines_batch,
     classify_position_batch,
 )
-from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY
-from matcher import load_portfolio, calculate_fit_scores_batch
+from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
+from matcher import (
+    load_portfolio,
+    calculate_fit_scores_batch,
+    evaluate_position_track_batch,
+    evaluate_difficulty_batch,
+)
 
 # Configure logging with datetime prefix
 logging.basicConfig(
@@ -40,6 +47,16 @@ MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _job_needs_llm(job: Dict[str, Any]) -> bool:
+    """Check if a job needs LLM processing."""
+    return needs_llm_processing(job)
+
+
+def _job_needs_fit_recompute(job: Dict[str, Any], portfolio_hash: str) -> bool:
+    """Check if a job needs fit/difficulty recomputation."""
+    return needs_fit_recompute(job, portfolio_hash)
 
 
 @app.route('/')
@@ -230,6 +247,71 @@ def api_get_stats():
         }), 500
 
 
+def _match_job_batch_web(job_batch: List[Dict[str, Any]], portfolio: Dict[str, str], portfolio_hash: str) -> Tuple[int, int, List[Dict[str, Any]], int]:
+    """Process a single batch of jobs for matching and save immediately (web version).
+    
+    Returns: (batch_saved, batch_errors, sample_results, heuristic_fallbacks)
+    """
+    timestamp = datetime.now().isoformat()
+    
+    scored_jobs = calculate_fit_scores_batch(job_batch, portfolio, use_llm=True, max_workers=LLM_MAX_CONCURRENCY)
+    difficulty_results = evaluate_difficulty_batch(job_batch, portfolio, max_workers=LLM_MAX_CONCURRENCY)
+    
+    batch_saved = 0
+    batch_errors = 0
+    sample_results = []
+    heuristic_fallbacks = 0
+    
+    # scored_jobs is a list of job dicts with fit_score already set
+    for job in scored_jobs:
+        job_id = job.get('job_id')
+        if not job_id:
+            continue
+        
+        difficulty_result = difficulty_results.get(job_id)
+        if difficulty_result:
+            job['difficulty_score'] = round(difficulty_result[0], 2)
+            job['difficulty_reasoning'] = difficulty_result[1]
+        else:
+            job.setdefault('difficulty_score', 50.0)
+            job.setdefault('difficulty_reasoning', 'LLM difficulty estimation unavailable; heuristic default applied.')
+        
+        job['fit_updated_at'] = timestamp
+        job['fit_portfolio_hash'] = portfolio_hash
+        
+        # Count heuristic fallbacks and collect samples (after setting difficulty_score)
+        if job.get('fit_reasoning', '').startswith('Heuristic fit score'):
+            heuristic_fallbacks += 1
+        if len(sample_results) < 5:
+            sample_results.append({
+                'job_id': job.get('job_id'),
+                'title': job.get('title'),
+                'fit_score': job.get('fit_score'),
+                'position_track': job.get('position_track'),
+                'difficulty_score': job.get('difficulty_score'),
+                'reasoning': job.get('fit_reasoning'),
+                'difficulty_reasoning': job.get('difficulty_reasoning'),
+            })
+        
+        try:
+            update_payload = {
+                'fit_score': job.get('fit_score'),
+                'difficulty_score': job.get('difficulty_score'),
+                'difficulty_reasoning': job.get('difficulty_reasoning'),
+                'fit_updated_at': timestamp,
+                'fit_portfolio_hash': portfolio_hash,
+            }
+            if update_job(job_id, update_payload):
+                batch_saved += 1
+            else:
+                batch_errors += 1
+        except Exception as e:
+            logger.error(f"Error updating job {job_id}: {e}")
+            batch_errors += 1
+    
+    return batch_saved, batch_errors, sample_results, heuristic_fallbacks
+
+
 @app.route('/api/match', methods=['POST'])
 def api_match_jobs():
     """Calculate fit scores using portfolio materials and update database."""
@@ -237,7 +319,8 @@ def api_match_jobs():
         logger.info("Match fit scores triggered from web interface")
 
         portfolio = load_portfolio()
-        if not portfolio.get('combined_text'):
+        combined_text = portfolio.get('combined_text')
+        if not combined_text:
             return jsonify({
                 'success': False,
                 'error': 'Portfolio text unavailable. Upload CV/research statement first.'
@@ -250,38 +333,64 @@ def api_match_jobs():
                 'error': 'No jobs available to match.'
             }), 400
 
-        scored_jobs = calculate_fit_scores_batch(jobs, portfolio, use_llm=True, max_workers=5)
+        request_payload = request.get_json() or {}
+        force = bool(request_payload.get('force'))
 
-        updated_count = 0
-        db_error_count = 0
-        sample_results = []
+        jobs_with_ids = [job for job in jobs if job.get('job_id')]
+        portfolio_hash = hashlib.sha256(combined_text.encode('utf-8')).hexdigest()
+
+        if force:
+            jobs_to_score = jobs_with_ids
+        else:
+            jobs_to_score = [job for job in jobs_with_ids if _job_needs_fit_recompute(job, portfolio_hash)]
+
+        if not jobs_to_score:
+            return jsonify({
+                'success': True,
+                'message': 'Fit scores already up-to-date; skipped recompute.',
+                'updated_count': 0,
+                'error_count': 0,
+                'heuristic_fallbacks': 0,
+                'sample': [],
+                'recomputed': 0,
+                'skipped': len(jobs_with_ids),
+                'force': force,
+            })
+
+        logger.info(f"Matching {len(jobs_to_score)} jobs (batch size: {LLM_PROCESSING_BATCH_SIZE})")
+        
+        total_saved = 0
+        total_errors = 0
         heuristic_fallbacks = 0
-
-        for job in scored_jobs:
-            if job.get('fit_reasoning', '').startswith('Heuristic fit score'):
-                heuristic_fallbacks += 1
-
-            try:
-                update_job(job['job_id'], {'fit_score': job.get('fit_score')})
-                updated_count += 1
-                if len(sample_results) < 5:
-                    sample_results.append({
-                        'job_id': job.get('job_id'),
-                        'title': job.get('title'),
-                        'fit_score': job.get('fit_score'),
-                        'reasoning': job.get('fit_reasoning')
-                    })
-            except Exception as match_error:
-                logger.error(f"Error updating fit score for {job.get('job_id')}: {match_error}")
-                db_error_count += 1
+        sample_results = []
+        
+        # Process in batches
+        for batch_start in range(0, len(jobs_to_score), LLM_PROCESSING_BATCH_SIZE):
+            batch_end = min(batch_start + LLM_PROCESSING_BATCH_SIZE, len(jobs_to_score))
+            job_batch = jobs_to_score[batch_start:batch_end]
+            batch_num = (batch_start // LLM_PROCESSING_BATCH_SIZE) + 1
+            total_batches = (len(jobs_to_score) + LLM_PROCESSING_BATCH_SIZE - 1) // LLM_PROCESSING_BATCH_SIZE
+            
+            logger.info(f"Matching batch {batch_num}/{total_batches} ({len(job_batch)} jobs)...")
+            
+            batch_saved, batch_errors, batch_samples, batch_fallbacks = _match_job_batch_web(job_batch, portfolio, portfolio_hash)
+            total_saved += batch_saved
+            total_errors += batch_errors
+            heuristic_fallbacks += batch_fallbacks
+            sample_results.extend(batch_samples[:5 - len(sample_results)])  # Add samples up to 5 total
+            
+            logger.info(f"Match batch {batch_num} complete: {batch_saved} saved, {batch_errors} errors. Total: {total_saved}/{len(jobs_to_score)}")
 
         return jsonify({
             'success': True,
-            'message': f'Fit scores updated: {updated_count} jobs, {db_error_count} update errors',
-            'updated_count': updated_count,
-            'error_count': db_error_count,
+            'message': f'Fit scores updated: {total_saved} jobs, {total_errors} update errors',
+            'updated_count': total_saved,
+            'error_count': total_errors,
             'heuristic_fallbacks': heuristic_fallbacks,
-            'sample': sample_results
+            'sample': sample_results,
+            'recomputed': total_saved,
+            'skipped': len(jobs_with_ids) - total_saved,
+            'force': force,
         })
 
     except Exception as e:
@@ -438,6 +547,15 @@ def api_scrape_jobs():
         
         # Mark expired jobs
         mark_expired()
+
+        try:
+            pending_llm = sum(
+                1 for job in get_all_jobs()
+                if needs_llm_processing(job)
+            )
+        except Exception as pending_error:  # noqa: BLE001
+            logger.debug("Failed to compute pending LLM jobs: %s", pending_error)
+            pending_llm = None
         
         return jsonify({
             'success': True,
@@ -446,7 +564,8 @@ def api_scrape_jobs():
             'updated_count': len(updated_jobs),
             'total_scraped': len(jobs),
             'backup_created': backup_created,
-            'backup_path': backup_path if backup_created else None
+            'backup_path': backup_path if backup_created else None,
+            'pending_llm': pending_llm
         })
         
     except Exception as e:
@@ -469,113 +588,37 @@ def api_process_jobs():
         
         # Get jobs that need processing
         all_jobs = get_all_jobs()
-        jobs_to_process = [
-            j for j in all_jobs 
-            if not j.get('position_type') and not j.get('field')
-        ]
+        jobs_to_process = [j for j in all_jobs if _job_needs_llm(j)]
         
         if limit:
             jobs_to_process = jobs_to_process[:limit]
         
-        logger.info(f"Processing {len(jobs_to_process)} jobs with LLM")
+        logger.info(f"Processing {len(jobs_to_process)} jobs with LLM (batch size: {LLM_PROCESSING_BATCH_SIZE})")
         
-        processed_count = 0
-        error_count = 0
-
-        description_inputs = [
-            (job['job_id'], job['description'])
-            for job in jobs_to_process
-            if job.get('job_id') and job.get('description')
-        ]
-        detail_results = extract_job_details_batch(description_inputs, max_workers=LLM_MAX_CONCURRENCY)
-
-        deadline_inputs = []
-        for job in jobs_to_process:
-            deadline_text = job.get('deadline')
-            if not deadline_text:
-                continue
-            if len(deadline_text) > 50 or any(word in deadline_text.lower() for word in ['until', 'by', 'before', 'extended']):
-                deadline_inputs.append((job['job_id'], deadline_text))
-        deadline_results = parse_deadlines_batch(deadline_inputs, max_workers=LLM_MAX_CONCURRENCY)
-
-        classify_inputs = [
-            (job['job_id'], job.get('title', ''), job.get('description', ''))
-            for job in jobs_to_process
-            if job.get('job_id') and job.get('title') and job.get('description')
-        ]
-        classify_results = classify_position_batch(classify_inputs, max_workers=LLM_MAX_CONCURRENCY)
-
-        for job in jobs_to_process:
-            try:
-                job_id = job.get('job_id')
-                description = job.get('description', '')
-                update_data: Dict[str, Any] = {}
-
-                details = detail_results.get(job_id, {}) if job_id else {}
-                if details:
-                    valid_fields = {
-                        'position_type', 'field', 'level', 'requirements',
-                        'extracted_deadline', 'application_portal_url', 'requires_separate_application',
-                        'country', 'application_materials', 'references_separate_email'
-                    }
-                    filtered_details = {k: v for k, v in details.items() if k in valid_fields}
-                    if 'research_areas' in details and details['research_areas']:
-                        research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
-                        if 'requirements' in filtered_details:
-                            filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
-                        else:
-                            filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
-                    if 'requires_separate_application' in filtered_details:
-                        filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
-                    if 'references_separate_email' in filtered_details:
-                        filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
-                    if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
-                        filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
-                    update_data.update(filtered_details)
-
-                deadline_text = job.get('deadline', '')
-                parsed_deadline = None
-                if job_id and job_id in deadline_results:
-                    parsed_deadline = deadline_results[job_id]
-                elif deadline_text:
-                    parsed_deadline = parse_deadlines(deadline_text)
-                if parsed_deadline and parsed_deadline != deadline_text:
-                    update_data['deadline'] = parsed_deadline
-
-                classification = classify_results.get(job_id) if job_id else None
-                if not classification and job.get('title') and description:
-                    classification = classify_position(job.get('title', ''), description[:500])
-                if classification:
-                    if 'field_focus' in classification and not update_data.get('field'):
-                        update_data['field'] = classification.get('field_focus', '')
-                    if 'level' in classification:
-                        update_data['level'] = classification.get('level', '')
-                    if 'type' in classification:
-                        update_data['position_type'] = classification.get('type', '')
-
-                valid_db_fields = {
-                    'title', 'institution', 'position_type', 'field', 'level',
-                    'deadline', 'location', 'description', 'requirements',
-                    'contact_info', 'posted_date', 'fit_score', 'application_status'
-                }
-                filtered_update = {k: v for k, v in update_data.items() if k in valid_db_fields}
-
-                if filtered_update:
-                    update_job(job_id, filtered_update)
-                    processed_count += 1
-                else:
-                    error_count += 1
-
-            except Exception as e:
-                logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {e}")
-                error_count += 1
-                continue
+        total_processed = 0
+        total_errors = 0
+        
+        # Process in batches
+        for batch_start in range(0, len(jobs_to_process), LLM_PROCESSING_BATCH_SIZE):
+            batch_end = min(batch_start + LLM_PROCESSING_BATCH_SIZE, len(jobs_to_process))
+            job_batch = jobs_to_process[batch_start:batch_end]
+            batch_num = (batch_start // LLM_PROCESSING_BATCH_SIZE) + 1
+            total_batches = (len(jobs_to_process) + LLM_PROCESSING_BATCH_SIZE - 1) // LLM_PROCESSING_BATCH_SIZE
+            
+            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(job_batch)} jobs)...")
+            
+            # Process this batch
+            batch_processed, batch_errors = _process_job_batch_web(job_batch)
+            total_processed += batch_processed
+            total_errors += batch_errors
+            
+            logger.info(f"Batch {batch_num} complete: {batch_processed} saved, {batch_errors} errors. Total: {total_processed}/{len(jobs_to_process)}")
 
         return jsonify({
             'success': True,
-            'message': f'LLM processing complete: {processed_count} jobs processed, {error_count} errors',
-            'processed_count': processed_count,
-            'error_count': error_count,
+            'message': f'LLM processing complete: {total_processed} jobs processed, {total_errors} errors',
+            'processed_count': total_processed,
+            'error_count': total_errors,
             'total_processed': len(jobs_to_process)
         })
         
@@ -585,6 +628,139 @@ def api_process_jobs():
             'success': False,
             'error': str(e)
         }), 500
+
+
+def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
+    """Process a single batch of jobs with LLM and save immediately (web version)."""
+    # Helper to check if a value is meaningful (not None, not empty string)
+    def has_meaningful_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.strip() != ''
+        if isinstance(value, bool):
+            return True  # Booleans are always meaningful
+        return True
+
+    # Prepare batch LLM inputs
+    description_inputs = [
+        (job['job_id'], job['description'])
+        for job in job_batch
+        if job.get('job_id') and job.get('description')
+    ]
+    detail_results = extract_job_details_batch(description_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+    deadline_inputs = []
+    for job in job_batch:
+        deadline_text = job.get('deadline')
+        if not deadline_text:
+            continue
+        if len(deadline_text) > 50 or any(word in deadline_text.lower() for word in ['until', 'by', 'before', 'extended']):
+            deadline_inputs.append((job['job_id'], deadline_text))
+    deadline_results = parse_deadlines_batch(deadline_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+    classify_inputs = [
+        (job['job_id'], job.get('title', ''), job.get('description', ''))
+        for job in job_batch
+        if job.get('job_id') and job.get('title') and job.get('description')
+    ]
+    classify_results = classify_position_batch(classify_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+    position_track_results = evaluate_position_track_batch(job_batch, max_workers=LLM_MAX_CONCURRENCY)
+
+    # Process and save each job in the batch
+    batch_processed = 0
+    batch_errors = 0
+    for job in job_batch:
+        try:
+            job_id = job.get('job_id')
+            description = job.get('description', '')
+            update_data: Dict[str, Any] = {}
+            existing_job = get_job(job_id) if job_id else {}
+            
+            details = detail_results.get(job_id, {}) if job_id else {}
+            if details:
+                valid_fields = {
+                    'position_type', 'field', 'level', 'requirements',
+                    'extracted_deadline', 'application_portal_url', 'requires_separate_application',
+                    'country', 'application_materials', 'references_separate_email'
+                }
+                filtered_details = {k: v for k, v in details.items() if k in valid_fields and has_meaningful_value(v)}
+                
+                for key, new_value in filtered_details.items():
+                    existing_value = existing_job.get(key)
+                    if not has_meaningful_value(existing_value) or (key in ('requirements', 'application_materials') and has_meaningful_value(new_value)):
+                        if key == 'requirements' and existing_value and has_meaningful_value(new_value):
+                            if new_value not in existing_value:
+                                update_data[key] = f"{existing_value}\n{new_value}"
+                        else:
+                            update_data[key] = new_value
+                
+                if 'research_areas' in details and details['research_areas']:
+                    research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
+                    if 'requirements' in update_data:
+                        update_data['requirements'] += f"\nResearch Areas: {research_areas_str}"
+                    elif not existing_job.get('requirements'):
+                        update_data['requirements'] = f"Research Areas: {research_areas_str}"
+                
+                if 'requires_separate_application' in filtered_details:
+                    update_data['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
+                if 'references_separate_email' in filtered_details:
+                    update_data['references_separate_email'] = bool(filtered_details['references_separate_email'])
+                if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
+                    update_data['application_materials'] = ', '.join(filtered_details['application_materials'])
+
+            deadline_text = job.get('deadline', '')
+            parsed_deadline = None
+            if job_id and job_id in deadline_results:
+                parsed_deadline = deadline_results[job_id]
+            elif deadline_text:
+                parsed_deadline = parse_deadlines(deadline_text)
+            if parsed_deadline and parsed_deadline != deadline_text and has_meaningful_value(parsed_deadline):
+                update_data['deadline'] = parsed_deadline
+
+            classification = classify_results.get(job_id) if job_id else None
+            if not classification and job.get('title') and description:
+                classification = classify_position(job.get('title', ''), description[:500])
+            if classification:
+                if 'field_focus' in classification and has_meaningful_value(classification.get('field_focus')):
+                    if not has_meaningful_value(existing_job.get('field')) and not update_data.get('field'):
+                        update_data['field'] = classification.get('field_focus', '')
+                if 'level' in classification and has_meaningful_value(classification.get('level')):
+                    if not has_meaningful_value(existing_job.get('level')) and 'level' not in update_data:
+                        update_data['level'] = classification.get('level', '')
+                if 'type' in classification and has_meaningful_value(classification.get('type')):
+                    if not has_meaningful_value(existing_job.get('position_type')) and 'position_type' not in update_data:
+                        update_data['position_type'] = classification.get('type', '')
+
+            track_result = position_track_results.get(job_id) if job_id else None
+            if track_result:
+                update_data['position_track'] = track_result[0]
+            elif not job.get('position_track'):
+                update_data.setdefault('position_track', 'other academia')
+
+            valid_db_fields = {
+                'title', 'institution', 'position_type', 'field', 'level',
+                'deadline', 'extracted_deadline', 'location', 'country', 'description', 'requirements',
+                'contact_info', 'posted_date', 'fit_score', 'application_status',
+                'application_portal_url', 'requires_separate_application',
+                'application_materials', 'references_separate_email',
+                'position_track', 'difficulty_score', 'difficulty_reasoning'
+            }
+            filtered_update = {k: v for k, v in update_data.items() if k in valid_db_fields and has_meaningful_value(v)}
+
+            if filtered_update:
+                update_job(job_id, filtered_update)
+                batch_processed += 1
+            else:
+                batch_errors += 1
+
+        except Exception as e:
+            logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {e}")
+            batch_errors += 1
+            continue
+    
+    return batch_processed, batch_errors
 
 
 @app.route('/api/jobs/batch', methods=['PUT'])

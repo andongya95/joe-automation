@@ -85,51 +85,6 @@ def evaluate_fit_with_llm(job: Dict[str, Any], portfolio: Dict[str, str]) -> Opt
         logger.warning("Portfolio text missing; skipping LLM fit evaluation.")
         return None
 
-
-def evaluate_fit_with_llm_batch(
-    jobs: List[Dict[str, Any]],
-    portfolio: Dict[str, str],
-    max_workers: int = 3
-) -> Dict[str, Tuple[float, Dict[str, Any]]]:
-    """Evaluate multiple jobs concurrently using the LLM.
-
-    Returns a mapping of job_id to (score, metadata). Jobs without IDs are skipped.
-    """
-
-    if not jobs:
-        return {}
-
-    portfolio_text = portfolio.get('combined_text') or ""
-    if not portfolio_text:
-        logger.warning("Portfolio text missing; skipping batch LLM evaluation.")
-        return {}
-
-    max_workers = max(1, max_workers)
-    results: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-
-    # Prepare job list with IDs to avoid repeated lookups inside threads
-    jobs_with_id = [(job.get('job_id'), job) for job in jobs if job.get('job_id')]
-
-    if not jobs_with_id:
-        return {}
-
-    def make_task(job_def: Tuple[str, Dict[str, Any]]) -> Callable[[], Optional[Tuple[float, Dict[str, Any]]]]:
-        job_id_inner, job_inner = job_def
-
-        def task() -> Optional[Tuple[float, Dict[str, Any]]]:
-            return evaluate_fit_with_llm(job_inner, portfolio)
-
-        return task
-
-    tasks = [(job_id, make_task((job_id, job))) for job_id, job in jobs_with_id]
-    task_results = execute_llm_tasks(tasks, max_workers=max_workers)
-
-    for job_id, result in task_results.items():
-        if result:
-            results[job_id] = result
-
-    return results
-
     portfolio_summary = _truncate_text(portfolio_text, 2500)
     prompt = build_fit_prompt(job, portfolio_summary)
 
@@ -176,5 +131,47 @@ def evaluate_fit_with_llm_batch(
     except Exception as exc:
         logger.error("Error during LLM fit evaluation: %s", exc)
         return None
+
+
+def evaluate_fit_with_llm_batch(
+    jobs: List[Dict[str, Any]],
+    portfolio: Dict[str, str],
+    max_workers: int = 3
+) -> Dict[str, Tuple[float, Dict[str, Any]]]:
+    """Evaluate multiple jobs concurrently using the LLM.
+
+    Returns a mapping of job_id to (score, metadata). Jobs without IDs are skipped.
+    """
+
+    if not jobs:
+        return {}
+
+    portfolio_text = portfolio.get('combined_text') or ""
+    if not portfolio_text:
+        logger.warning("Portfolio text missing; skipping batch LLM evaluation.")
+        return {}
+
+    max_workers = max(1, max_workers)
+    results: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    jobs_with_id = [(job.get('job_id'), job) for job in jobs if job.get('job_id')]
+
+    if not jobs_with_id:
+        return {}
+
+    def make_task(job_inner: Dict[str, Any]) -> Callable[[], Optional[Tuple[float, Dict[str, Any]]]]:
+        def task() -> Optional[Tuple[float, Dict[str, Any]]]:
+            return evaluate_fit_with_llm(job_inner, portfolio)
+
+        return task
+
+    tasks = [(job_id, make_task(job)) for job_id, job in jobs_with_id]
+    task_results = execute_llm_tasks(tasks, max_workers=max_workers)
+
+    for job_id, result in task_results.items():
+        if result:
+            results[job_id] = result
+
+    return results
 
 

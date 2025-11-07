@@ -43,7 +43,11 @@ def migrate_database():
             'requires_separate_application': 'INTEGER DEFAULT 0',
             'country': 'TEXT',
             'application_materials': 'TEXT',
-            'references_separate_email': 'INTEGER DEFAULT 0'
+            'references_separate_email': 'INTEGER DEFAULT 0',
+            'position_track': 'TEXT',
+            'difficulty_score': 'REAL',
+            'difficulty_reasoning': 'TEXT',
+            'fit_updated_at': 'TIMESTAMP'
         }
         
         for column_name, column_type in new_columns.items():

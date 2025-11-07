@@ -9,6 +9,8 @@ from .job_db import (
     mark_expired,
     update_fit_score,
     update_status,
+    needs_llm_processing,
+    needs_fit_recompute,
 )
 from .backup import (
     create_backup,
@@ -27,6 +29,8 @@ __all__ = [
     "mark_expired",
     "update_fit_score",
     "update_status",
+    "needs_llm_processing",
+    "needs_fit_recompute",
     "create_backup",
     "create_backup_if_changed",
     "list_backups",

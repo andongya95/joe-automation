@@ -75,8 +75,10 @@ def add_job(job_data: Dict[str, Any]) -> bool:
                     deadline, extracted_deadline, location, country, description, requirements, contact_info,
                     posted_date, last_updated, fit_score, application_status,
                     application_portal_url, requires_separate_application,
-                    application_materials, references_separate_email
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    application_materials, references_separate_email,
+                    position_track, difficulty_score, difficulty_reasoning,
+                    fit_updated_at, fit_portfolio_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job_data.get('job_id'),
                 job_data.get('title'),
@@ -98,7 +100,12 @@ def add_job(job_data: Dict[str, Any]) -> bool:
                 job_data.get('application_portal_url'),
                 1 if job_data.get('requires_separate_application') else 0,
                 job_data.get('application_materials'),
-                1 if job_data.get('references_separate_email') else 0
+                1 if job_data.get('references_separate_email') else 0,
+                job_data.get('position_track'),
+                job_data.get('difficulty_score'),
+                job_data.get('difficulty_reasoning'),
+                job_data.get('fit_updated_at'),
+                job_data.get('fit_portfolio_hash')
             ))
             return cursor.rowcount > 0
     except Exception as e:
@@ -135,6 +142,96 @@ def update_job(job_id: str, job_data: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Failed to update job {job_id}: {e}")
         return False
+
+
+def needs_fit_recompute(job: Dict[str, Any], portfolio_hash: str) -> bool:
+    """
+    Check if a job needs fit/difficulty recomputation.
+    
+    A job needs recomputation if:
+    - fit_score is None
+    - position_track is missing (needs LLM processing first)
+    - difficulty_score is None
+    - fit_portfolio_hash doesn't match current portfolio hash
+    - fit_updated_at is missing
+    - Job was updated after last fit calculation (last_updated > fit_updated_at)
+    
+    Args:
+        job: Job dictionary from database
+        portfolio_hash: Hash of the current portfolio
+        
+    Returns:
+        True if job needs fit recomputation, False otherwise
+    """
+    from datetime import datetime
+    
+    if job.get('fit_score') is None:
+        return True
+    if not job.get('position_track'):
+        return True
+    if job.get('difficulty_score') is None:
+        return True
+    if job.get('fit_portfolio_hash') != portfolio_hash:
+        return True
+
+    fit_updated_at = job.get('fit_updated_at')
+    if not fit_updated_at:
+        return True
+
+    last_updated = job.get('last_updated')
+    if last_updated:
+        try:
+            fit_dt = datetime.fromisoformat(fit_updated_at)
+            last_dt = datetime.fromisoformat(last_updated)
+            if last_dt > fit_dt:
+                return True
+        except ValueError:
+            return True
+
+    return False
+
+
+def needs_llm_processing(job: Dict[str, Any]) -> bool:
+    """
+    Check if a job needs LLM processing.
+    
+    A job needs LLM processing if ANY of the LLM-processed fields are empty:
+    - extracted_deadline
+    - application_portal_url
+    - country
+    - application_materials
+    - requires_separate_application
+    - references_separate_email
+    - position_track
+    
+    Args:
+        job: Job dictionary from database
+        
+    Returns:
+        True if job needs LLM processing, False otherwise
+    """
+    def is_empty(value: Any) -> bool:
+        """Check if a value is empty (None, empty string)."""
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ''
+        # For boolean/int fields, None means unprocessed, False/0 is a valid processed value
+        return False
+    
+    # Check each LLM-processed field individually
+    llm_fields = {
+        'extracted_deadline': job.get('extracted_deadline'),
+        'application_portal_url': job.get('application_portal_url'),
+        'country': job.get('country'),
+        'application_materials': job.get('application_materials'),
+        'requires_separate_application': job.get('requires_separate_application'),
+        'references_separate_email': job.get('references_separate_email'),
+        'position_track': job.get('position_track'),
+    }
+    
+    # If ANY field is empty, the job needs processing
+    return any(is_empty(value) for value in llm_fields.values())
 
 
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
@@ -212,7 +309,7 @@ def update_fit_score(job_id: str, fit_score: float) -> bool:
 
 def update_status(job_id: str, status: str) -> bool:
     """Update the application status for a job."""
-    valid_statuses = ['new', 'applied', 'expired', 'rejected', 'accepted']
+    valid_statuses = ['pending', 'new', 'applied', 'expired', 'rejected', 'accepted']
     if status not in valid_statuses:
         logger.warning(f"Invalid status '{status}', using 'new'")
         status = 'new'

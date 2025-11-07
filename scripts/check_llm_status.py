@@ -42,6 +42,27 @@ def main() -> None:
         """
     ).fetchone()[0]
 
+    with_position_track = cur.execute(
+        """
+        SELECT COUNT(*) FROM job_postings
+        WHERE position_track IS NOT NULL AND TRIM(position_track) != ''
+        """
+    ).fetchone()[0]
+
+    with_difficulty = cur.execute(
+        """
+        SELECT COUNT(*) FROM job_postings
+        WHERE difficulty_score IS NOT NULL
+        """
+    ).fetchone()[0]
+
+    with_fit_cache = cur.execute(
+        """
+        SELECT COUNT(*) FROM job_postings
+        WHERE fit_updated_at IS NOT NULL
+        """
+    ).fetchone()[0]
+
     not_processed = cur.execute(
         """
         SELECT COUNT(*) FROM job_postings
@@ -51,6 +72,8 @@ def main() -> None:
           AND (country IS NULL OR TRIM(country) = '')
           AND (application_materials IS NULL OR TRIM(application_materials) = '')
           AND (references_separate_email IS NULL OR references_separate_email = 0)
+          AND (position_track IS NULL OR TRIM(position_track) = '')
+          AND (difficulty_score IS NULL)
         """
     ).fetchone()[0]
 
@@ -58,6 +81,9 @@ def main() -> None:
     print(f"Jobs with any LLM fields: {with_llm}")
     print(f"Jobs with materials/refs info: {with_new}")
     print(f"Jobs with country: {with_country}")
+    print(f"Jobs with position track: {with_position_track}")
+    print(f"Jobs with difficulty score: {with_difficulty}")
+    print(f"Jobs with cached fit scores: {with_fit_cache}")
     print(f"Jobs missing all new fields: {not_processed}")
 
     if not_processed:
@@ -71,6 +97,8 @@ def main() -> None:
               AND (country IS NULL OR TRIM(country) = '')
               AND (application_materials IS NULL OR TRIM(application_materials) = '')
               AND (references_separate_email IS NULL OR references_separate_email = 0)
+              AND (position_track IS NULL OR TRIM(position_track) = '')
+              AND (difficulty_score IS NULL)
             LIMIT 5
             """
         ).fetchall()

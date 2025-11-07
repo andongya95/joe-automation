@@ -11,6 +11,8 @@ let selectedJobs = new Set(); // Track selected job IDs for bulk operations
 const COLUMN_DEFINITIONS = [
     { id: 'checkbox', label: 'Select', defaultWidth: 50, resizable: false },
     { id: 'fit_score', label: 'Fit Score', defaultWidth: 100, resizable: true },
+    { id: 'position_track', label: 'Position Track', defaultWidth: 160, resizable: true },
+    { id: 'difficulty_score', label: 'Difficulty', defaultWidth: 110, resizable: true },
     { id: 'title', label: 'Title', defaultWidth: 200, resizable: true },
     { id: 'institution', label: 'Institution', defaultWidth: 180, resizable: true },
     { id: 'field', label: 'Field', defaultWidth: 150, resizable: true },
@@ -37,6 +39,88 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
 });
 
+async function callProcessApi(limit = null) {
+    const response = await fetch('/api/process', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ limit })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process jobs');
+    }
+    return data;
+}
+
+async function runProcessAfterScrape(autoTriggered = false) {
+    try {
+        const data = await callProcessApi();
+        const message = `LLM Processing complete!\n${data.message}\n\nProcessed: ${data.processed_count}\nErrors: ${data.error_count}\nTotal: ${data.total_processed}`;
+        if (autoTriggered) {
+            alert(`Auto processing finished.\n\n${message}`);
+        } else {
+            alert(message);
+        }
+        await loadJobs();
+        await loadStats();
+        await loadFilters();
+        return true;
+    } catch (error) {
+        console.error('Auto LLM processing failed:', error);
+        alert('Auto LLM processing failed: ' + error.message);
+        return false;
+    }
+}
+
+async function callMatchApi(force = false) {
+    const response = await fetch('/api/match', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ force })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to match fit scores');
+    }
+    return data;
+}
+
+async function runMatchAfterScrape(autoTriggered = false, force = false) {
+    try {
+        const data = await callMatchApi(force);
+        let message = `Fit scores updated!\n${data.message}`;
+        if (typeof data.recomputed === 'number') {
+            message += `\nRecomputed: ${data.recomputed}`;
+        }
+        if (typeof data.skipped === 'number') {
+            message += `\nSkipped: ${data.skipped}`;
+        }
+        if (autoTriggered) {
+            alert(`Auto matching finished.\n\n${message}`);
+        } else {
+            alert(message);
+        }
+        await loadStats();
+        await loadJobs();
+        await loadFilters();
+        const forceToggle = document.getElementById('forceMatchToggle');
+        if (forceToggle && !force) {
+            forceToggle.checked = false;
+        }
+        return true;
+    } catch (error) {
+        console.error('Auto matching failed:', error);
+        alert('Auto matching failed: ' + error.message);
+        return false;
+    }
+}
+
 // Setup event listeners
 function setupEventListeners() {
     // Filters
@@ -49,7 +133,12 @@ function setupEventListeners() {
     document.getElementById('clearFilters').addEventListener('click', clearFilters);
     document.getElementById('scrapeButton').addEventListener('click', triggerScrape);
     document.getElementById('processButton').addEventListener('click', triggerProcess);
-    document.getElementById('matchButton').addEventListener('click', triggerMatch);
+    const matchButton = document.getElementById('matchButton');
+    matchButton.addEventListener('click', () => {
+        const forceToggle = document.getElementById('forceMatchToggle');
+        const force = forceToggle ? forceToggle.checked : false;
+        triggerMatch(force);
+    });
     document.getElementById('saveButton').addEventListener('click', saveEdits);
     document.getElementById('cancelEditButton').addEventListener('click', cancelEdit);
     
@@ -118,6 +207,7 @@ async function loadStats() {
         if (data.success) {
             const stats = data.stats;
             document.getElementById('statTotal').textContent = stats.total;
+            document.getElementById('statPending').textContent = stats.by_status.pending || 0;
             document.getElementById('statNew').textContent = stats.by_status.new || 0;
             document.getElementById('statApplied').textContent = stats.by_status.applied || 0;
             document.getElementById('statAvgScore').textContent = stats.avg_fit_score.toFixed(1);
@@ -259,6 +349,10 @@ function sortJobs(jobs) {
                 aVal = a.fit_score || 0;
                 bVal = b.fit_score || 0;
                 break;
+            case 'difficulty_score':
+                aVal = typeof a.difficulty_score === 'number' ? a.difficulty_score : Number.POSITIVE_INFINITY;
+                bVal = typeof b.difficulty_score === 'number' ? b.difficulty_score : Number.POSITIVE_INFINITY;
+                break;
             case 'deadline':
                 aVal = a.deadline || '';
                 bVal = b.deadline || '';
@@ -296,7 +390,7 @@ function renderJobs() {
     const tbody = document.getElementById('jobsTableBody');
     
     if (filteredJobs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="16" class="loading">No jobs found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="18" class="loading">No jobs found</td></tr>';
         return;
     }
     
@@ -305,11 +399,19 @@ function renderJobs() {
         const fitScoreClass = fitScore >= 70 ? 'fit-score-high' : fitScore >= 40 ? 'fit-score-medium' : 'fit-score-low';
         const statusClass = `status-${job.application_status || 'new'}`;
         const isSelected = selectedJobs.has(job.job_id);
+        const positionTrack = (job.position_track || 'N/A');
+        const difficultyScore = typeof job.difficulty_score === 'number' ? job.difficulty_score : null;
+        const difficultyDisplay = difficultyScore !== null ? `${difficultyScore.toFixed(1)}%` : 'N/A';
+        const difficultyClass = difficultyScore !== null ?
+            (difficultyScore <= 15 ? 'difficulty-high' : difficultyScore <= 40 ? 'difficulty-medium' : 'difficulty-low') :
+            'difficulty-unknown';
         
         return `
             <tr data-job-id="${job.job_id}">
                 <td data-column="checkbox"><input type="checkbox" class="job-checkbox" data-job-id="${job.job_id}" ${isSelected ? 'checked' : ''}></td>
                 <td data-column="fit_score"><span class="fit-score ${fitScoreClass}">${fitScore.toFixed(1)}</span></td>
+                <td data-column="position_track">${escapeHtml(positionTrack)}</td>
+                <td data-column="difficulty_score"><span class="difficulty-chip ${difficultyClass}">${difficultyDisplay}</span></td>
                 <td data-column="title">${escapeHtml(job.title || 'N/A')}</td>
                 <td data-column="institution">${escapeHtml(job.institution || 'N/A')}</td>
                 <td data-column="field">${escapeHtml(job.field || 'N/A')}</td>
@@ -419,7 +521,7 @@ async function viewJobDetails(jobId) {
 // Update job status
 async function updateStatus(jobId) {
     const currentStatus = allJobs.find(j => j.job_id === jobId)?.application_status || 'new';
-    const statuses = ['new', 'applied', 'expired', 'rejected'];
+    const statuses = ['pending', 'new', 'applied', 'expired', 'rejected'];
     const currentIndex = statuses.indexOf(currentStatus);
     const nextStatus = statuses[(currentIndex + 1) % statuses.length];
     
@@ -848,13 +950,43 @@ async function triggerScrape() {
         const data = await response.json();
         
         if (data.success) {
-            // Show success message
-            alert(`Scraping complete!\n${data.message}\n\nNew jobs: ${data.new_count}\nUpdated jobs: ${data.updated_count}\nTotal scraped: ${data.total_scraped}`);
+            let alertMessage = `Scraping complete!\n${data.message}\n\nNew jobs: ${data.new_count}\nUpdated jobs: ${data.updated_count}\nTotal scraped: ${data.total_scraped}`;
+            if (typeof data.pending_llm === 'number' && data.pending_llm > 100) {
+                alertMessage += `\n\n⚠️ ${data.pending_llm} postings still need LLM processing. Run "Process with LLM" to parse them.`;
+            }
+            alert(alertMessage);
             
             // Reload jobs and stats
-            await loadJobs();
-            await loadStats();
-            await loadFilters();
+            let processHandled = false;
+            let matchHandled = false;
+            if (typeof data.new_count === 'number' && data.new_count > 0) {
+                if (data.new_count > 100) {
+                    const userWantsProcess = confirm(`There are ${data.new_count} new postings.\nDo you want to run LLM processing now?`);
+                    if (userWantsProcess) {
+                        processHandled = await runProcessAfterScrape(false);
+                        if (processHandled) {
+                            const userWantsMatch = confirm('Run Match Fit Scores now?');
+                            if (userWantsMatch) {
+                                matchHandled = await runMatchAfterScrape(false);
+                            }
+                        }
+                    } else {
+                        const userWantsMatchOnly = confirm('Skip LLM processing but run Match Fit Scores now?');
+                        if (userWantsMatchOnly) {
+                            matchHandled = await runMatchAfterScrape(false);
+                        }
+                    }
+                } else {
+                    processHandled = await runProcessAfterScrape(true);
+                    matchHandled = await runMatchAfterScrape(true);
+                }
+            }
+
+            if (!processHandled && !matchHandled) {
+                await loadJobs();
+                await loadStats();
+                await loadFilters();
+            }
         } else {
             alert('Scraping failed: ' + (data.error || 'Unknown error'));
         }
@@ -880,26 +1012,11 @@ async function triggerProcess() {
     button.textContent = 'Processing...';
     
     try {
-        const response = await fetch('/api/process', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ limit: null })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            alert(`LLM Processing complete!\n${data.message}\n\nProcessed: ${data.processed_count}\nErrors: ${data.error_count}\nTotal: ${data.total_processed}`);
-            
-            // Reload jobs and stats
-            await loadJobs();
-            await loadStats();
-            await loadFilters();
-        } else {
-            alert('Processing failed: ' + (data.error || 'Unknown error'));
-        }
+        const data = await callProcessApi();
+        alert(`LLM Processing complete!\n${data.message}\n\nProcessed: ${data.processed_count}\nErrors: ${data.error_count}\nTotal: ${data.total_processed}`);
+        await loadJobs();
+        await loadStats();
+        await loadFilters();
     } catch (error) {
         console.error('Error triggering process:', error);
         alert('Error triggering process: ' + error.message);
@@ -912,30 +1029,26 @@ async function triggerProcess() {
 }
 
 // Trigger fit score matching
-async function triggerMatch() {
+async function triggerMatch(forceFull = false) {
     const button = document.getElementById('matchButton');
     const originalText = button.textContent;
 
     button.disabled = true;
     button.textContent = 'Matching...';
+    button.classList.add('processing');
 
     try {
-        const response = await fetch('/api/match', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-            throw new Error(data.error || 'Failed to match fit scores');
-        }
+        const data = await callMatchApi(forceFull);
 
         let message = data.message || 'Fit scores updated successfully';
         if (typeof data.heuristic_fallbacks === 'number' && data.heuristic_fallbacks > 0) {
             message += `\nUsed heuristic fallback for ${data.heuristic_fallbacks} job(s).`;
+        }
+        if (typeof data.recomputed === 'number') {
+            message += `\nRecomputed: ${data.recomputed}`;
+        }
+        if (typeof data.skipped === 'number') {
+            message += `\nSkipped: ${data.skipped}`;
         }
         if (Array.isArray(data.sample) && data.sample.length > 0) {
             const sampleText = data.sample.map(sample => {
@@ -950,12 +1063,19 @@ async function triggerMatch() {
         alert(message);
         await loadStats();
         await loadJobs();
+        await loadFilters();
+
+        const forceToggle = document.getElementById('forceMatchToggle');
+        if (forceToggle && !forceFull) {
+            forceToggle.checked = false;
+        }
     } catch (error) {
         console.error('Error matching fit scores:', error);
         showError('Error matching fit scores: ' + error.message);
     } finally {
         button.disabled = false;
         button.textContent = originalText;
+        button.classList.remove('processing');
     }
 }
 
@@ -977,7 +1097,10 @@ function enterEditMode(jobId) {
     }
     
     // Make editable fields
-    // Column order: fit_score(0), title(1), institution(2), field(3), level(4), deadline(5), extracted_deadline(6), location(7), country(8), status(9), materials(10), refs_email(11), portal(12), link(13), actions(14)
+    // Column order reference:
+    // checkbox(0), fit_score(1), position_track(2), difficulty_score(3), title(4), institution(5), field(6), level(7), deadline(8),
+    // extracted_deadline(9), location(10), country(11), status(12), application_materials(13), references_separate_email(14),
+    // application_portal(15), link(16), actions(17)
     const editableFields = ['title', 'institution', 'field', 'level', 'deadline', 'extracted_deadline', 'location', 'country', 'application_status', 'application_materials', 'application_portal_url'];
     const editableIndices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]; // Corresponding cell indices
     const cells = row.querySelectorAll('td');

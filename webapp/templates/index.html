@@ -19,6 +19,10 @@
                     <span class="stat-value" id="statTotal">-</span>
                 </div>
                 <div class="stat-item">
+                    <span class="stat-label">Pending:</span>
+                    <span class="stat-value" id="statPending">-</span>
+                </div>
+                <div class="stat-item">
                     <span class="stat-label">New:</span>
                     <span class="stat-value" id="statNew">-</span>
                 </div>
@@ -39,6 +43,7 @@
                     <label for="filterStatus">Status:</label>
                     <select id="filterStatus">
                         <option value="">All (excluding unrelated)</option>
+                        <option value="pending">Pending</option>
                         <option value="new">New</option>
                         <option value="applied">Applied</option>
                         <option value="expired">Expired</option>
@@ -75,6 +80,10 @@
                 <button id="scrapeButton" class="btn-scrape">Scrape New Jobs</button>
                 <button id="processButton" class="btn-process">Process with LLM</button>
                 <button id="matchButton" class="btn-process">Match Fit Scores</button>
+                <label class="force-toggle">
+                    <input type="checkbox" id="forceMatchToggle">
+                    <span>Force full recompute</span>
+                </label>
                 <button id="columnSettingsBtn" class="btn-column-settings" title="Column Settings">⚙️ Columns</button>
             </div>
             <div class="bulk-actions" id="bulkActions" style="display: none;">
@@ -82,6 +91,7 @@
                 <button id="selectAllBtn" class="btn-select">Select All</button>
                 <button id="deselectAllBtn" class="btn-select">Deselect All</button>
                 <select id="bulkStatusSelect">
+                    <option value="pending">Mark as Pending</option>
                     <option value="unrelated">Mark as Unrelated</option>
                     <option value="new">Mark as New</option>
                     <option value="applied">Mark as Applied</option>
@@ -103,6 +113,8 @@
                     <tr>
                         <th data-column="checkbox"><input type="checkbox" id="selectAllCheckbox" title="Select All"></th>
                         <th class="sortable" data-column="fit_score" data-sort="fit_score">Fit Score</th>
+                        <th data-column="position_track">Position Track</th>
+                        <th class="sortable" data-column="difficulty_score" data-sort="difficulty_score">Difficulty</th>
                         <th class="sortable" data-column="title" data-sort="title">Title</th>
                         <th class="sortable" data-column="institution" data-sort="institution">Institution</th>
                         <th data-column="field">Field</th>
@@ -121,7 +133,7 @@
                 </thead>
                 <tbody id="jobsTableBody">
                     <tr>
-                        <td colspan="15" class="loading">Loading jobs...</td>
+                        <td colspan="18" class="loading">Loading jobs...</td>
                     </tr>
                 </tbody>
             </table>

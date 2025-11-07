@@ -47,6 +47,8 @@ config/settings.py
 *.sqlite3
 data/*.db
 data/backups/*.db
+*.lock
+data/*.lock
 
 # Logs
 *.log

@@ -9,6 +9,7 @@ Automated tool for scraping, processing, and matching job postings from AEA JOE 
 - **Automated Scraping**: Downloads job listings from AEA JOE XLS export
 - **LLM Processing**: Extracts structured information using DeepSeek, OpenAI, or Anthropic
 - **Portfolio Matching**: Calculates fit scores based on your qualifications
+- **Track & Difficulty Insights**: Classifies each role type and estimates application difficulty using LLMs
 - **Database Management**: SQLite database for local storage and querying
 - **Web Dashboard**: Interactive web interface for visualization and management
 - **CSV Export/Import**: Export data for editing, then import changes back
@@ -57,7 +58,8 @@ python main.py --update
 python main.py --process
 
 # Calculate fit scores
-python main.py --match
+python main.py --match        # incremental
+python main.py --match --force-match   # full recompute
 
 # Export to CSV
 python main.py --export
@@ -68,6 +70,8 @@ python main.py --import-csv data/exports/job_matches.csv
 # Start web server
 python main.py --web
 ```
+
+> ℹ️ When you scrape via CLI or the dashboard, the app automatically runs LLM parsing if ≤100 new postings were retrieved. For larger batches you’ll be prompted (web) or warned (CLI) to trigger `--process` manually so you stay within rate limits.
 
 ### Batch Files (Windows)
 
@@ -106,9 +110,9 @@ The script automatically uses the Python interpreter on your `$PATH` (override w
 ## Command-Line Options
 
 - `--update`: Scrape and download latest job listings
-- `--process`: Process jobs with LLM incrementally (saves after each job)
+- `--process`: Process jobs with LLM incrementally (processes in batches, saves after each batch)
 - `--process-limit N`: Limit number of jobs to process (default: all)
-- `--match`: Calculate fit scores for all jobs
+- `--match`: Calculate fit scores for all jobs (processes in batches, saves after each batch)
 - `--export`: Export results to CSV file
 - `--import-csv PATH`: Import changes from CSV file and update database
 - `--web`: Start web server for database visualization
@@ -119,8 +123,8 @@ The script automatically uses the Python interpreter on your `$PATH` (override w
 ### Workflow
 
 1. **Scrape & Save**: Download latest job postings and save raw data to database (`--update`)
-2. **Process with LLM**: Extract structured information incrementally, saving after each job (`--process`)
-3. **Match**: Calculate fit scores based on portfolio (`--match`)
+2. **Process with LLM**: Extract structured information in batches, saving after each batch (`--process`)
+3. **Match**: Calculate fit scores based on portfolio in batches, saving after each batch (`--match`)
 4. **Export**: Export to CSV for visualization and editing (`--export`)
 5. **Import**: Import changes from CSV back to database (`--import-csv`)
 6. **Web Interface**: Use web dashboard for interactive management (`--web`)
@@ -157,12 +161,14 @@ The web interface provides an interactive dashboard for visualizing and managing
 **Main Dashboard Features:**
 - **Statistics Dashboard**: View total jobs, counts by status, average fit score
 - **Scrape New Jobs**: Click "Scrape New Jobs" button to download latest listings from AEA JOE
-- **Process with LLM**: Click "Process with LLM" button to extract structured information from job descriptions
+- **Process with LLM**: Click "Process with LLM" button to extract structured information from job descriptions (processes in batches, saves progress)
+- **Match Fit Scores**: Click "Match Fit Scores" button to calculate fit and difficulty scores (processes in batches, saves progress)
 - **Filtering**: Filter by status, field, level, minimum fit score
 - **Search**: Text search across titles, institutions, and descriptions
 - **Sorting**: Click column headers to sort by fit score, deadline, institution, etc.
 - **Job Details**: Click "View" to see full job description and requirements
-- **Status Updates**: Click "Status" to cycle through application statuses (new → applied → expired → rejected)
+- **Status Updates**: Click "Status" to cycle through application statuses (pending → new → applied → expired → rejected)
+- **Force Recompute Toggle**: Use "Force full recompute" next to "Match Fit Scores" when you need to refresh every job (default only updates changed postings)
 - **Edit Jobs**: Click "Edit" to modify job information inline, then "Save Changes" to update database
 - **AEA JOE Links**: Direct links to view original job postings on AEA JOE website
 - **Responsive Design**: Works on desktop and mobile devices
@@ -207,9 +213,8 @@ The system automatically creates database backups when operations cross date bou
 ## Documentation
 
 Additional documentation is available in the `docs/` directory:
-- `docs/instructions.md` - Original project instructions
-- `docs/PROMPTS.md` - LLM prompts used for processing
-- `docs/WORKFLOW.md` - Detailed workflow documentation
+- `docs/DEVELOPMENT.md` - Complete development documentation (architecture, components, LLM integration, troubleshooting)
+- `docs/CHANGELOG.md` - Change log and version history
 
 ## Security Note
 

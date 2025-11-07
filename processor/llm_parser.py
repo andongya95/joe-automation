@@ -205,9 +205,13 @@ def execute_llm_tasks(
     if not tasks:
         return {}
 
+    total_tasks = len(tasks)
+    logger.info("Dispatching %d LLM task(s) with concurrency <= %d", total_tasks, max_workers or LLM_MAX_CONCURRENCY)
+
     executor = _get_executor(max_workers)
     futures = {executor.submit(task): task_id for task_id, task in tasks}
     results: Dict[str, Optional[T]] = {}
+    completed = 0
 
     for future in as_completed(futures):
         task_id = futures[future]
@@ -216,6 +220,10 @@ def execute_llm_tasks(
         except Exception as exc:  # noqa: BLE001
             logger.error("LLM task %s failed: %s", task_id, exc)
             results[task_id] = None
+        finally:
+            completed += 1
+            if completed % 10 == 0 or completed == total_tasks:
+                logger.info("LLM progress: %d/%d task(s) completed", completed, total_tasks)
 
     return results
 

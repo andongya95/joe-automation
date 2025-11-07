@@ -23,7 +23,11 @@ CREATE TABLE IF NOT EXISTS job_postings (
     fit_score REAL,
     application_status TEXT DEFAULT 'new',
     application_portal_url TEXT,
-    requires_separate_application INTEGER DEFAULT 0
+    requires_separate_application INTEGER DEFAULT 0,
+    position_track TEXT,
+    difficulty_score REAL,
+    difficulty_reasoning TEXT,
+    fit_updated_at TIMESTAMP
 );
 """
 
@@ -33,5 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_fit_score ON job_postings(fit_score DESC);
 CREATE INDEX IF NOT EXISTS idx_deadline ON job_postings(deadline);
 CREATE INDEX IF NOT EXISTS idx_status ON job_postings(application_status);
 CREATE INDEX IF NOT EXISTS idx_last_updated ON job_postings(last_updated);
+CREATE INDEX IF NOT EXISTS idx_position_track ON job_postings(position_track);
+CREATE INDEX IF NOT EXISTS idx_fit_updated ON job_postings(fit_updated_at);
 """
 
