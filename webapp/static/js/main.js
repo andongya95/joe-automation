@@ -142,32 +142,47 @@ async function loadFilters() {
         
         if (fieldsData.success) {
             const filterField = document.getElementById('filterField');
-            fieldsData.fields.forEach(field => {
-                const option = document.createElement('option');
-                option.value = field;
-                option.textContent = field;
-                filterField.appendChild(option);
-            });
+            if (filterField) {
+                while (filterField.options.length > 1) {
+                    filterField.remove(1);
+                }
+                fieldsData.fields.forEach(field => {
+                    const option = document.createElement('option');
+                    option.value = field;
+                    option.textContent = field;
+                    filterField.appendChild(option);
+                });
+            }
         }
         
         if (levelsData.success) {
             const filterLevel = document.getElementById('filterLevel');
-            levelsData.levels.forEach(level => {
-                const option = document.createElement('option');
-                option.value = level;
-                option.textContent = level;
-                filterLevel.appendChild(option);
-            });
+            if (filterLevel) {
+                while (filterLevel.options.length > 1) {
+                    filterLevel.remove(1);
+                }
+                levelsData.levels.forEach(level => {
+                    const option = document.createElement('option');
+                    option.value = level;
+                    option.textContent = level;
+                    filterLevel.appendChild(option);
+                });
+            }
         }
         
         if (countriesData.success) {
             const filterCountry = document.getElementById('filterCountry');
-            countriesData.countries.forEach(country => {
-                const option = document.createElement('option');
-                option.value = country;
-                option.textContent = country;
-                filterCountry.appendChild(option);
-            });
+            if (filterCountry) {
+                while (filterCountry.options.length > 1) {
+                    filterCountry.remove(1);
+                }
+                countriesData.countries.forEach(country => {
+                    const option = document.createElement('option');
+                    option.value = country;
+                    option.textContent = country;
+                    filterCountry.appendChild(option);
+                });
+            }
         }
     } catch (error) {
         console.error('Error loading filters:', error);
@@ -839,8 +854,7 @@ async function triggerScrape() {
             // Reload jobs and stats
             await loadJobs();
             await loadStats();
-            await loadFields();
-            await loadLevels();
+            await loadFilters();
         } else {
             alert('Scraping failed: ' + (data.error || 'Unknown error'));
         }
@@ -882,8 +896,7 @@ async function triggerProcess() {
             // Reload jobs and stats
             await loadJobs();
             await loadStats();
-            await loadFields();
-            await loadLevels();
+            await loadFilters();
         } else {
             alert('Processing failed: ' + (data.error || 'Unknown error'));
         }

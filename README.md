@@ -81,6 +81,28 @@ Windows batch files are provided in the `scripts/` directory for easy startup:
 
 Simply double-click any batch file to run the corresponding command.
 
+### Shell Scripts (macOS / Linux)
+
+Shell scripts are provided for Unix-like environments:
+
+- `scripts/start_web.sh` - Start the web server (default port 5000)
+- `scripts/start_web_port.sh [PORT]` - Start the web server on a custom port
+
+From the project root:
+
+```bash
+# Ensure scripts are executable (first time only)
+chmod +x scripts/*.sh
+
+# Start the dashboard on macOS/Linux
+bash ./scripts/start_web.sh
+
+# Specify a custom port
+bash ./scripts/start_web_port.sh 8000
+```
+
+The script automatically uses the Python interpreter on your `$PATH` (override with `PYTHON_BIN=/path/to/python bash ./scripts/start_web.sh`).
+
 ## Command-Line Options
 
 - `--update`: Scrape and download latest job listings
