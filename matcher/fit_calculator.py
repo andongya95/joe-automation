@@ -2,7 +2,9 @@
 
 import logging
 import re
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
+
+from .llm_fit_evaluator import evaluate_fit_with_llm, evaluate_fit_with_llm_batch
 
 from config.settings import RESEARCH_FOCAL_AREAS
 
@@ -143,11 +145,11 @@ def calculate_institution_match(job_institution: str, job_location: str = "") ->
     return score
 
 
-def calculate_fit_score(
+def _calculate_fit_score_rule_based(
     job: Dict[str, Any],
     portfolio: Dict[str, str]
 ) -> float:
-    """Calculate overall fit score (0-100) using weighted algorithm."""
+    """Calculate overall fit score (0-100) using the heuristic algorithm."""
     # Extract job information
     job_description = str(job.get('description', ''))
     job_field = str(job.get('field', ''))
@@ -189,6 +191,65 @@ def calculate_fit_score(
     )
     
     return round(fit_score, 2)
+
+
+def calculate_fit_score(
+    job: Dict[str, Any],
+    portfolio: Dict[str, str],
+    use_llm: bool = True
+) -> float:
+    """Calculate overall fit score, preferring the LLM evaluator with heuristic fallback."""
+
+    if use_llm:
+        llm_result = evaluate_fit_with_llm(job, portfolio)
+        if llm_result:
+            score, metadata = llm_result
+            clamped_score = max(0.0, min(score, 100.0))
+            job['fit_reasoning'] = metadata.get('reasoning', '')
+            job['fit_alignment'] = metadata.get('alignment', {})
+            return round(clamped_score, 2)
+
+    # Fallback to heuristic scoring if LLM unavailable or fails
+    heuristic_score = _calculate_fit_score_rule_based(job, portfolio)
+    job.setdefault('fit_reasoning', 'Heuristic fit score used (LLM unavailable).')
+    return heuristic_score
+
+
+def calculate_fit_scores_batch(
+    jobs: List[Dict[str, Any]],
+    portfolio: Dict[str, str],
+    use_llm: bool = True,
+    max_workers: int = 3
+) -> List[Dict[str, Any]]:
+    """Calculate fit scores for multiple jobs, using concurrent LLM calls when available."""
+
+    if not jobs:
+        return []
+
+    llm_results: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    if use_llm:
+        llm_results = evaluate_fit_with_llm_batch(jobs, portfolio, max_workers=max_workers)
+
+    scored_jobs: List[Dict[str, Any]] = []
+
+    for job in jobs:
+        job_id = job.get('job_id')
+        llm_result = llm_results.get(job_id) if job_id else None
+
+        if llm_result:
+            score, metadata = llm_result
+            clamped_score = max(0.0, min(score, 100.0))
+            job['fit_score'] = round(clamped_score, 2)
+            job['fit_reasoning'] = metadata.get('reasoning', '')
+            job['fit_alignment'] = metadata.get('alignment', {})
+        else:
+            job['fit_score'] = _calculate_fit_score_rule_based(job, portfolio)
+            job.setdefault('fit_reasoning', 'Heuristic fit score used (LLM unavailable).')
+
+        scored_jobs.append(job)
+
+    return rank_jobs(scored_jobs)
 
 
 def rank_jobs(jobs: List[Dict[str, Any]], reverse: bool = True) -> List[Dict[str, Any]]:

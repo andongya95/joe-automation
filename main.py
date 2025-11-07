@@ -22,9 +22,16 @@ from database import (
     create_backup_if_changed
 )
 from scraper import download_job_data, parse_job_listings, identify_new_postings
-from processor import extract_job_details, parse_deadlines, classify_position
-from matcher import load_portfolio, calculate_fit_score, rank_jobs
-from config.settings import VERBOSE, DATABASE_PATH
+from processor import (
+    extract_job_details,
+    parse_deadlines,
+    classify_position,
+    extract_job_details_batch,
+    parse_deadlines_batch,
+    classify_position_batch,
+)
+from matcher import load_portfolio, calculate_fit_scores_batch, rank_jobs
+from config.settings import VERBOSE, DATABASE_PATH, LLM_MAX_CONCURRENCY
 
 
 def setup_logging(verbose: bool = False):
@@ -150,64 +157,80 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
         logger.info(f"Found {len(jobs_to_process)} jobs to process")
         
         processed_count = 0
-        
+
+        # Precompute batch LLM inputs
+        description_inputs = [
+            (job['job_id'], job['description'])
+            for job in jobs_to_process
+            if job.get('job_id') and job.get('description')
+        ]
+        detail_results = extract_job_details_batch(description_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+        deadline_inputs = []
+        for job in jobs_to_process:
+            deadline_text = job.get('deadline')
+            if not deadline_text:
+                continue
+            if len(deadline_text) > 50 or any(word in deadline_text.lower() for word in ['until', 'by', 'before', 'extended']):
+                deadline_inputs.append((job['job_id'], deadline_text))
+        deadline_results = parse_deadlines_batch(deadline_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+        classify_inputs = [
+            (job['job_id'], job.get('title', ''), job.get('description', ''))
+            for job in jobs_to_process
+            if job.get('job_id') and job.get('title') and job.get('description')
+        ]
+        classify_results = classify_position_batch(classify_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
         for i, job in enumerate(jobs_to_process, 1):
             try:
                 job_id = job.get('job_id')
                 logger.info(f"Processing job {i}/{len(jobs_to_process)}: {job.get('title', 'Unknown')[:60]} (ID: {job_id})")
-                
-                # Extract job details
-                description = job.get('description', '')
-                update_data = {}
-                
-                if description:
-                    details = extract_job_details(description, {})
-                    if details:
-                        # Filter to only include valid database fields
-                        valid_fields = {
-                            'position_type', 'field', 'level', 'requirements',
-                            'extracted_deadline', 'application_portal_url', 'requires_separate_application',
-                            'country', 'application_materials', 'references_separate_email'
-                        }
-                        filtered_details = {k: v for k, v in details.items() if k in valid_fields}
-                        # Convert research_areas list to string if present and add to requirements
-                        if 'research_areas' in details and details['research_areas']:
-                            research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
-                            if 'requirements' in filtered_details:
-                                filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
-                            else:
-                                filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
-                        # Convert boolean to integer for database
-                        if 'requires_separate_application' in filtered_details:
-                            filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
-                        if 'references_separate_email' in filtered_details:
-                            filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
-                        # Convert application_materials list to string if present
-                        if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
-                            filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
-                        update_data.update(filtered_details)
-                
-                # Parse deadline
+
+                update_data: Dict[str, Any] = {}
+
+                details = detail_results.get(job_id, {}) if job_id else {}
+                if details:
+                    valid_fields = {
+                        'position_type', 'field', 'level', 'requirements',
+                        'extracted_deadline', 'application_portal_url', 'requires_separate_application',
+                        'country', 'application_materials', 'references_separate_email'
+                    }
+                    filtered_details = {k: v for k, v in details.items() if k in valid_fields}
+                    if 'research_areas' in details and details['research_areas']:
+                        research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
+                        if 'requirements' in filtered_details:
+                            filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
+                        else:
+                            filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
+                    if 'requires_separate_application' in filtered_details:
+                        filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
+                    if 'references_separate_email' in filtered_details:
+                        filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
+                    if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
+                        filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
+                    update_data.update(filtered_details)
+
                 deadline_text = job.get('deadline', '')
-                if deadline_text:
+                parsed_deadline = None
+                if job_id and job_id in deadline_results:
+                    parsed_deadline = deadline_results[job_id]
+                elif deadline_text:
                     parsed_deadline = parse_deadlines(deadline_text)
-                    if parsed_deadline and parsed_deadline != deadline_text:
-                        update_data['deadline'] = parsed_deadline
-                
-                # Classify position
-                title = job.get('title', '')
-                if title and description:
-                    classification = classify_position(title, description[:500])
-                    if classification:
-                        # Map field_focus to field if field not already set
-                        if 'field_focus' in classification and not update_data.get('field'):
-                            update_data['field'] = classification.get('field_focus', '')
-                        if 'level' in classification:
-                            update_data['level'] = classification.get('level', '')
-                        if 'type' in classification:
-                            update_data['position_type'] = classification.get('type', '')
-                
-                # Filter update_data to only include valid database columns
+                if parsed_deadline and parsed_deadline != deadline_text:
+                    update_data['deadline'] = parsed_deadline
+
+                classification = classify_results.get(job_id) if job_id else None
+                if not classification and job.get('title') and job.get('description'):
+                    classification = classify_position(job.get('title', ''), job.get('description', '')[:500])
+                if classification:
+                    if 'field_focus' in classification and not update_data.get('field'):
+                        update_data['field'] = classification.get('field_focus', '')
+                    if 'level' in classification:
+                        update_data['level'] = classification.get('level', '')
+                    if 'type' in classification:
+                        update_data['position_type'] = classification.get('type', '')
+
                 valid_db_fields = {
                     'title', 'institution', 'position_type', 'field', 'level',
                     'deadline', 'extracted_deadline', 'location', 'country', 'description', 'requirements',
@@ -216,15 +239,14 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
                     'application_materials', 'references_separate_email'
                 }
                 filtered_update = {k: v for k, v in update_data.items() if k in valid_db_fields}
-                
-                # Save immediately after processing
+
                 if filtered_update:
                     update_job(job_id, filtered_update)
                     processed_count += 1
                     logger.info(f"Saved updates for job {job_id}")
                 else:
                     logger.warning(f"No updates extracted for job {job_id}")
-                
+
             except Exception as e:
                 logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {e}")
                 continue
@@ -249,19 +271,7 @@ def match_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         
         logger.info("Calculating fit scores...")
         
-        matched_jobs = []
-        for job in jobs:
-            try:
-                fit_score = calculate_fit_score(job, portfolio)
-                job['fit_score'] = fit_score
-                matched_jobs.append(job)
-            except Exception as e:
-                logger.error(f"Error calculating fit score for {job.get('job_id')}: {e}")
-                job['fit_score'] = 0.0
-                matched_jobs.append(job)
-        
-        # Rank jobs by fit score
-        ranked_jobs = rank_jobs(matched_jobs)
+        ranked_jobs = calculate_fit_scores_batch(jobs, portfolio, use_llm=True, max_workers=5)
         logger.info(f"Matched and ranked {len(ranked_jobs)} jobs")
         
         return ranked_jobs

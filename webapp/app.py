@@ -12,9 +12,16 @@ from database import (
     add_job, mark_expired, create_backup_if_changed
 )
 from scraper import download_job_data, parse_job_listings
-from processor import extract_job_details, parse_deadlines, classify_position
-from config.settings import PORTFOLIO_PATH
-from matcher import load_portfolio, calculate_fit_score
+from processor import (
+    extract_job_details,
+    parse_deadlines,
+    classify_position,
+    extract_job_details_batch,
+    parse_deadlines_batch,
+    classify_position_batch,
+)
+from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY
+from matcher import load_portfolio, calculate_fit_scores_batch
 
 # Configure logging with datetime prefix
 logging.basicConfig(
@@ -243,24 +250,38 @@ def api_match_jobs():
                 'error': 'No jobs available to match.'
             }), 400
 
-        updated_count = 0
-        error_count = 0
+        scored_jobs = calculate_fit_scores_batch(jobs, portfolio, use_llm=True, max_workers=5)
 
-        for job in jobs:
+        updated_count = 0
+        db_error_count = 0
+        sample_results = []
+        heuristic_fallbacks = 0
+
+        for job in scored_jobs:
+            if job.get('fit_reasoning', '').startswith('Heuristic fit score'):
+                heuristic_fallbacks += 1
+
             try:
-                fit_score = calculate_fit_score(job, portfolio)
-                if fit_score is not None:
-                    update_job(job['job_id'], {'fit_score': fit_score})
-                    updated_count += 1
+                update_job(job['job_id'], {'fit_score': job.get('fit_score')})
+                updated_count += 1
+                if len(sample_results) < 5:
+                    sample_results.append({
+                        'job_id': job.get('job_id'),
+                        'title': job.get('title'),
+                        'fit_score': job.get('fit_score'),
+                        'reasoning': job.get('fit_reasoning')
+                    })
             except Exception as match_error:
-                logger.error(f"Error calculating fit score for {job.get('job_id')}: {match_error}")
-                error_count += 1
+                logger.error(f"Error updating fit score for {job.get('job_id')}: {match_error}")
+                db_error_count += 1
 
         return jsonify({
             'success': True,
-            'message': f'Fit scores updated: {updated_count} jobs, {error_count} errors',
+            'message': f'Fit scores updated: {updated_count} jobs, {db_error_count} update errors',
             'updated_count': updated_count,
-            'error_count': error_count
+            'error_count': db_error_count,
+            'heuristic_fallbacks': heuristic_fallbacks,
+            'sample': sample_results
         })
 
     except Exception as e:
@@ -460,79 +481,96 @@ def api_process_jobs():
         
         processed_count = 0
         error_count = 0
-        
+
+        description_inputs = [
+            (job['job_id'], job['description'])
+            for job in jobs_to_process
+            if job.get('job_id') and job.get('description')
+        ]
+        detail_results = extract_job_details_batch(description_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+        deadline_inputs = []
+        for job in jobs_to_process:
+            deadline_text = job.get('deadline')
+            if not deadline_text:
+                continue
+            if len(deadline_text) > 50 or any(word in deadline_text.lower() for word in ['until', 'by', 'before', 'extended']):
+                deadline_inputs.append((job['job_id'], deadline_text))
+        deadline_results = parse_deadlines_batch(deadline_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
+        classify_inputs = [
+            (job['job_id'], job.get('title', ''), job.get('description', ''))
+            for job in jobs_to_process
+            if job.get('job_id') and job.get('title') and job.get('description')
+        ]
+        classify_results = classify_position_batch(classify_inputs, max_workers=LLM_MAX_CONCURRENCY)
+
         for job in jobs_to_process:
             try:
                 job_id = job.get('job_id')
                 description = job.get('description', '')
-                update_data = {}
-                
-                if description:
-                    details = extract_job_details(description, {})
-                    if details:
-                        # Filter to only include valid database fields
-                        valid_fields = {
-                            'position_type', 'field', 'level', 'requirements',
-                            'extracted_deadline', 'application_portal_url', 'requires_separate_application',
-                            'country', 'application_materials', 'references_separate_email'
-                        }
-                        filtered_details = {k: v for k, v in details.items() if k in valid_fields}
-                        # Convert research_areas list to string if present and add to requirements
-                        if 'research_areas' in details and details['research_areas']:
-                            research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
-                            if 'requirements' in filtered_details:
-                                filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
-                            else:
-                                filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
-                        # Convert boolean to integer for database
-                        if 'requires_separate_application' in filtered_details:
-                            filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
-                        if 'references_separate_email' in filtered_details:
-                            filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
-                        # Convert application_materials list to string if present
-                        if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
-                            filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
-                        update_data.update(filtered_details)
-                
-                # Parse deadline
+                update_data: Dict[str, Any] = {}
+
+                details = detail_results.get(job_id, {}) if job_id else {}
+                if details:
+                    valid_fields = {
+                        'position_type', 'field', 'level', 'requirements',
+                        'extracted_deadline', 'application_portal_url', 'requires_separate_application',
+                        'country', 'application_materials', 'references_separate_email'
+                    }
+                    filtered_details = {k: v for k, v in details.items() if k in valid_fields}
+                    if 'research_areas' in details and details['research_areas']:
+                        research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
+                        if 'requirements' in filtered_details:
+                            filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
+                        else:
+                            filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
+                    if 'requires_separate_application' in filtered_details:
+                        filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
+                    if 'references_separate_email' in filtered_details:
+                        filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
+                    if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
+                        filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
+                    update_data.update(filtered_details)
+
                 deadline_text = job.get('deadline', '')
-                if deadline_text:
+                parsed_deadline = None
+                if job_id and job_id in deadline_results:
+                    parsed_deadline = deadline_results[job_id]
+                elif deadline_text:
                     parsed_deadline = parse_deadlines(deadline_text)
-                    if parsed_deadline and parsed_deadline != deadline_text:
-                        update_data['deadline'] = parsed_deadline
-                
-                # Classify position
-                title = job.get('title', '')
-                if title and description:
-                    classification = classify_position(title, description[:500])
-                    if classification:
-                        if 'field_focus' in classification and not update_data.get('field'):
-                            update_data['field'] = classification.get('field_focus', '')
-                        if 'level' in classification:
-                            update_data['level'] = classification.get('level', '')
-                        if 'type' in classification:
-                            update_data['position_type'] = classification.get('type', '')
-                
-                # Filter update_data to only include valid database columns
+                if parsed_deadline and parsed_deadline != deadline_text:
+                    update_data['deadline'] = parsed_deadline
+
+                classification = classify_results.get(job_id) if job_id else None
+                if not classification and job.get('title') and description:
+                    classification = classify_position(job.get('title', ''), description[:500])
+                if classification:
+                    if 'field_focus' in classification and not update_data.get('field'):
+                        update_data['field'] = classification.get('field_focus', '')
+                    if 'level' in classification:
+                        update_data['level'] = classification.get('level', '')
+                    if 'type' in classification:
+                        update_data['position_type'] = classification.get('type', '')
+
                 valid_db_fields = {
                     'title', 'institution', 'position_type', 'field', 'level',
                     'deadline', 'location', 'description', 'requirements',
                     'contact_info', 'posted_date', 'fit_score', 'application_status'
                 }
                 filtered_update = {k: v for k, v in update_data.items() if k in valid_db_fields}
-                
-                # Save immediately after processing
+
                 if filtered_update:
                     update_job(job_id, filtered_update)
                     processed_count += 1
                 else:
                     error_count += 1
-                    
+
             except Exception as e:
                 logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {e}")
                 error_count += 1
                 continue
-        
+
         return jsonify({
             'success': True,
             'message': f'LLM processing complete: {processed_count} jobs processed, {error_count} errors',

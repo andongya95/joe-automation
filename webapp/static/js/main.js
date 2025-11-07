@@ -920,7 +920,21 @@ async function triggerMatch() {
             throw new Error(data.error || 'Failed to match fit scores');
         }
 
-        alert(data.message || 'Fit scores updated successfully');
+        let message = data.message || 'Fit scores updated successfully';
+        if (typeof data.heuristic_fallbacks === 'number' && data.heuristic_fallbacks > 0) {
+            message += `\nUsed heuristic fallback for ${data.heuristic_fallbacks} job(s).`;
+        }
+        if (Array.isArray(data.sample) && data.sample.length > 0) {
+            const sampleText = data.sample.map(sample => {
+                const title = sample.title || 'Unknown title';
+                const score = typeof sample.fit_score === 'number' ? sample.fit_score.toFixed(1) : 'N/A';
+                const reasoning = sample.reasoning ? `Reasoning: ${sample.reasoning}` : 'Reasoning: (not provided)';
+                return `• ${title} — Score: ${score}. ${reasoning}`;
+            }).join('\n');
+            message += `\n\nSample results:\n${sampleText}`;
+        }
+
+        alert(message);
         await loadStats();
         await loadJobs();
     } catch (error) {
