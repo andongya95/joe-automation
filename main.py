@@ -35,6 +35,7 @@ from matcher import (
     load_portfolio,
     rank_jobs,
     evaluate_position_track_batch,
+    evaluate_fit_and_difficulty_batch,
 )
 from matcher.fit_calculator import score_job_with_joint_prompt
 from config.settings import VERBOSE, DATABASE_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
@@ -228,9 +229,19 @@ def _process_job_batch(job_batch: List[Dict[str, Any]]) -> int:
 
             track_result = position_track_results.get(job_id) if job_id else None
             if track_result:
-                update_data['position_track'] = track_result[0]
+                # Normalize position track for ambiguous titles
+                from matcher.job_assessor import _normalize_position_track_for_ambiguous_title
+                normalized_track = _normalize_position_track_for_ambiguous_title(job, track_result[0])
+                update_data['position_track'] = normalized_track
             elif not job.get('position_track'):
                 update_data.setdefault('position_track', 'other academia')
+            
+            # Handle level field - ensure comma-separated if multiple levels
+            if 'level' in update_data and isinstance(update_data['level'], (list, tuple)):
+                update_data['level'] = ', '.join(str(l) for l in update_data['level'])
+            elif 'level' in update_data and isinstance(update_data['level'], str) and ',' in update_data['level']:
+                # Already comma-separated, keep as is
+                pass
 
             valid_db_fields = {
                 'title', 'institution', 'position_type', 'field', 'level',
@@ -307,37 +318,92 @@ def _match_job_batch(
     portfolio_hash: str,
     force: bool = False,
 ) -> int:
-    """Process a batch sequentially, saving each job after recomputation."""
+    """Process a batch concurrently using LLM, saving each job incrementally as results arrive."""
 
     timestamp = datetime.now().isoformat()
     batch_saved = 0
     skipped = 0
     fallbacks = 0
 
-    for index, job in enumerate(job_batch, 1):
+    # Filter jobs that need recomputation
+    jobs_to_score = []
+    jobs_to_skip = []
+    for job in job_batch:
         job_id = job.get('job_id')
         if not job_id:
-            logger.warning("Skipping job without ID at batch index %d", index)
+            logger.warning("Skipping job without ID")
             continue
+        
+        if force or job.get('fit_score') is None or job.get('difficulty_score') is None:
+            jobs_to_score.append(job)
+        else:
+            jobs_to_skip.append(job)
 
-        original_fit = job.get('fit_score')
-        original_difficulty = job.get('difficulty_score')
+    if jobs_to_skip:
+        skipped = len(jobs_to_skip)
+        logger.info("Match batch skipping %d job(s) already scored", skipped)
 
-        _, recomputed, llm_success = score_job_with_joint_prompt(job, portfolio, force=force)
+    if not jobs_to_score:
+        return 0
 
-        if not recomputed:
-            skipped += 1
-            logger.info(
-                "Skipping job %s (ID: %s); fit=%s difficulty=%s already set.",
-                job.get('title', 'Unknown')[:60],
-                job_id,
-                original_fit,
-                original_difficulty,
-            )
+    # Process jobs concurrently using batch LLM evaluation
+    logger.info("Processing %d job(s) concurrently with LLM (max concurrency: %d)", 
+                len(jobs_to_score), LLM_MAX_CONCURRENCY)
+    
+    # Use concurrent processing but save incrementally as each job completes
+    from processor.llm_parser import execute_llm_tasks
+    from matcher.llm_fit_evaluator import evaluate_fit_and_difficulty
+    
+    # Create tasks for concurrent execution
+    tasks = []
+    job_map = {}  # Map job_id to job dict for saving
+    for job in jobs_to_score:
+        job_id = job.get('job_id')
+        if job_id:
+            job_map[job_id] = job
+            # Use default parameter to capture job in closure
+            tasks.append((job_id, lambda j=job: evaluate_fit_and_difficulty(j, portfolio)))
+    
+    # Execute tasks concurrently, but process results incrementally as they complete
+    from concurrent.futures import as_completed
+    from processor.llm_parser import _get_executor
+    
+    executor = _get_executor(LLM_MAX_CONCURRENCY)
+    futures = {executor.submit(task): job_id for job_id, task in tasks}
+    
+    completed_count = 0
+    for future in as_completed(futures):
+        job_id = futures[future]
+        job = job_map.get(job_id)
+        if not job:
             continue
+            
+        try:
+            llm_result = future.result()
+        except Exception as exc:
+            logger.error("LLM call failed for job %s: %s", job_id, exc)
+            llm_result = None
 
-        if not llm_success:
+        if llm_result:
+            # LLM succeeded - update job with results
+            job['fit_score'] = round(llm_result['fit_score'], 2)
+            job['fit_reasoning'] = llm_result.get('fit_reasoning', '')
+            job['fit_alignment'] = llm_result.get('fit_alignment', {})
+            job['difficulty_score'] = round(llm_result['difficulty_score'], 2)
+            job['difficulty_reasoning'] = llm_result.get('difficulty_reasoning', '')
+        else:
+            # LLM failed - use heuristic fallback
             fallbacks += 1
+            from matcher.fit_calculator import _calculate_fit_score_rule_based
+            job['fit_score'] = _calculate_fit_score_rule_based(job, portfolio)
+            job.setdefault('fit_reasoning', 'Heuristic fit score used (LLM unavailable).')
+            if force or job.get('difficulty_score') is None:
+                job['difficulty_score'] = job.get('difficulty_score') or 50.0
+            if force or not job.get('difficulty_reasoning'):
+                job['difficulty_reasoning'] = job.get(
+                    'difficulty_reasoning',
+                    'LLM difficulty estimation unavailable; heuristic default applied.',
+                )
 
         job['fit_updated_at'] = timestamp
         job['fit_portfolio_hash'] = portfolio_hash
@@ -350,22 +416,24 @@ def _match_job_batch(
             'fit_portfolio_hash': portfolio_hash,
         }
 
+        # Save immediately as each job completes (incremental save)
         if update_job(job_id, update_payload):
             batch_saved += 1
+            completed_count += 1
             logger.info(
-                "Saved match results for %s (ID: %s): fit=%.2f difficulty=%.2f",
+                "Saved match results for %s (ID: %s): fit=%.2f difficulty=%.2f [%d/%d]",
                 job.get('title', 'Unknown')[:60],
                 job_id,
                 update_payload['fit_score'] or 0.0,
                 update_payload['difficulty_score'] or 0.0,
+                completed_count,
+                len(jobs_to_score),
             )
         else:
             logger.error("Failed to update job %s during matching", job_id)
 
     if fallbacks:
         logger.warning("Match batch used heuristic fallback for %d job(s)", fallbacks)
-    if skipped:
-        logger.info("Match batch skipped %d job(s) already scored", skipped)
 
     return batch_saved
 

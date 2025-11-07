@@ -47,7 +47,15 @@ DEFAULT_PROMPTS: Dict[str, str] = {
         "}\n\n"
         "Scoring Guidance:\n\n"
         "Fit Score reflects research and teaching alignment only, not competitiveness.\n\n"
-        "Difficulty Score reflects likelihood of securing the offer, holding fit constant.\n\n"
+        "Difficulty Score reflects likelihood of securing the offer (0-100 scale, where 0 = impossible, 100 = guaranteed).\n"
+        "IMPORTANT: Lower scores mean HIGHER difficulty (harder to get). Higher scores mean LOWER difficulty (easier to get).\n\n"
+        "Difficulty Score Benchmarks:\n"
+        "- Top 30 US universities (assistant professor): difficulty_score < 5 (very difficult, low chance ~5%)\n"
+        "- Top 5 China universities (assistant professor): difficulty_score around 10 (difficult, low chance ~10%)\n"
+        "- Mid-tier R1 universities: difficulty_score 15-30 (moderately difficult)\n"
+        "- Regional universities / less selective institutions: difficulty_score 30-60 (moderate difficulty)\n"
+        "- Non-tenure track / teaching-focused positions: difficulty_score 50-80 (moderate to easier)\n"
+        "- Senior tenure-track (associate/full): difficulty_score near 0 (extremely difficult for early-career candidates)\n\n"
         "Keep reasoning precise, concise, and evidence-based."
     ),
     "user_prompt": (

@@ -100,6 +100,16 @@
                     <option value="expired">Mark as Expired</option>
                 </select>
                 <button id="bulkUpdateBtn" class="btn-bulk-update">Update Selected</button>
+                <button id="processSelectedBtn" class="btn-process">Process Selected</button>
+                <label class="force-toggle">
+                    <input type="checkbox" id="forceProcessToggle">
+                    <span>Force re-process</span>
+                </label>
+                <button id="matchSelectedBtn" class="btn-process">Match Selected</button>
+                <label class="force-toggle">
+                    <input type="checkbox" id="forceMatchSelectedToggle">
+                    <span>Force recompute</span>
+                </label>
             </div>
             <div class="edit-controls" id="editControls" style="display: none;">
                 <button id="saveButton" class="btn-save">Save Changes</button>
@@ -113,6 +123,7 @@
                 <thead>
                     <tr>
                         <th data-column="checkbox"><input type="checkbox" id="selectAllCheckbox" title="Select All"></th>
+                        <th data-column="job_id">ID</th>
                         <th class="sortable" data-column="fit_score" data-sort="fit_score">Fit Score</th>
                         <th data-column="position_track">Position Track</th>
                         <th class="sortable" data-column="difficulty_score" data-sort="difficulty_score">Difficulty</th>
@@ -134,7 +145,7 @@
                 </thead>
                 <tbody id="jobsTableBody">
                     <tr>
-                        <td colspan="18" class="loading">Loading jobs...</td>
+                        <td colspan="19" class="loading">Loading jobs...</td>
                     </tr>
                 </tbody>
             </table>

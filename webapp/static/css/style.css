@@ -653,6 +653,28 @@ td.loading {
     color: white;
 }
 
+.status-dropdown {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 500;
+    text-transform: capitalize;
+    border: 1px solid #d1d5db;
+    background-color: white;
+    cursor: pointer;
+    min-width: 100px;
+}
+
+.status-dropdown:hover {
+    border-color: #667eea;
+}
+
+.status-dropdown:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
 /* Fit Score */
 .fit-score {
     font-weight: bold;

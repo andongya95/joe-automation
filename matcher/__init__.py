@@ -11,6 +11,7 @@ from .llm_fit_evaluator import (
     evaluate_fit_with_llm,
     evaluate_fit_with_llm_batch,
     evaluate_fit_and_difficulty,
+    evaluate_fit_and_difficulty_batch,
 )
 from .job_assessor import (
     evaluate_position_track_batch,
@@ -25,6 +26,7 @@ __all__ = [
     "evaluate_fit_with_llm",
     "evaluate_fit_with_llm_batch",
     "evaluate_fit_and_difficulty",
+    "evaluate_fit_and_difficulty_batch",
     "evaluate_position_track_batch",
 ]
 

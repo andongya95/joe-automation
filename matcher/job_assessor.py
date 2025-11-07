@@ -84,6 +84,48 @@ def _build_job_snapshot(job: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _normalize_position_track_for_ambiguous_title(job: Dict[str, Any], track_result: Optional[str]) -> Optional[str]:
+    """Normalize position track for ambiguous titles (e.g., 'faculty position' without rank).
+    
+    When title is ambiguous and covers multiple ranks, default to lowest rank (assistant/junior tenure-track).
+    
+    Args:
+        job: Job dictionary with title and description
+        track_result: LLM-evaluated position track result
+        
+    Returns:
+        Normalized position track, or original if not ambiguous
+    """
+    if not track_result:
+        return track_result
+    
+    title = (job.get('title') or '').lower()
+    description = (job.get('description') or '').lower()
+    combined_text = f"{title} {description}"
+    
+    # Check if title is ambiguous (contains generic terms without specific rank)
+    ambiguous_patterns = [
+        'faculty position',
+        'professor position',
+        'faculty member',
+        'professor',
+    ]
+    
+    # Check if specific ranks are mentioned
+    specific_ranks = ['assistant', 'associate', 'full', 'postdoc', 'lecturer', 'instructor']
+    has_specific_rank = any(rank in combined_text for rank in specific_ranks)
+    
+    # If ambiguous pattern found but no specific rank, and LLM returned senior tenure-track
+    is_ambiguous = any(pattern in title for pattern in ambiguous_patterns) and not has_specific_rank
+    
+    if is_ambiguous and track_result == 'senior tenure-track':
+        # Default to junior tenure-track (assistant level) for ambiguous titles
+        logger.info(f"Normalizing ambiguous title '{job.get('title')}' from '{track_result}' to 'junior tenure-track'")
+        return 'junior tenure-track'
+    
+    return track_result
+
+
 def _evaluate_position_track(job: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     prompt = _build_job_snapshot(job)
     response = _call_llm(prompt, POSITION_TRACK_SYSTEM_PROMPT)

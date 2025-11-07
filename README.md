@@ -112,7 +112,7 @@ The script automatically uses the Python interpreter on your `$PATH` (override w
 - `--update`: Scrape and download latest job listings
 - `--process`: Process jobs with LLM incrementally (processes in batches, saves after each batch)
 - `--process-limit N`: Limit number of jobs to process (default: all)
-- `--match`: Calculate fit & difficulty scores sequentially per job (saves after each job, skips already-scored entries unless `--force-match`)
+- `--match`: Calculate fit & difficulty scores using concurrent processing (saves incrementally as each job completes, skips already-scored entries unless `--force-match`)
 - `--export`: Export results to CSV file
 - `--import-csv PATH`: Import changes from CSV file and update database
 - `--web`: Start web server for database visualization
@@ -124,7 +124,7 @@ The script automatically uses the Python interpreter on your `$PATH` (override w
 
 1. **Scrape & Save**: Download latest job postings and save raw data to database (`--update`)
 2. **Process with LLM**: Extract structured information in batches, saving after each batch (`--process`)
-3. **Match**: Run the joint fit/difficulty prompt job-by-job, saving after each update and only recomputing if either score is missing (or when forced) (`--match`)
+3. **Match**: Run the joint fit/difficulty prompt using concurrent processing (up to 20 parallel LLM calls), saving incrementally as each job completes and only recomputing if either score is missing (or when forced) (`--match`)
 4. **Export**: Export to CSV for visualization and editing (`--export`)
 5. **Import**: Import changes from CSV back to database (`--import-csv`)
 6. **Web Interface**: Use web dashboard for interactive management (`--web`)
@@ -162,14 +162,16 @@ The web interface provides an interactive dashboard for visualizing and managing
 - **Statistics Dashboard**: View total jobs, counts by status, average fit score
 - **Scrape New Jobs**: Click "Scrape New Jobs" button to download latest listings from AEA JOE
 - **Process with LLM**: Click "Process with LLM" button to extract structured information from job descriptions (processes in batches, saves progress)
-- **Match Fit Scores**: Click "Match Fit Scores" button to run the joint fit/difficulty prompt per job (sequential saves, skips already-scored jobs unless "Force" is enabled)
+- **Match Fit Scores**: Click "Match Fit Scores" button to run the joint fit/difficulty prompt per job (concurrent processing with incremental saves, skips already-scored jobs unless "Force" is enabled)
+- **Selected Jobs Operations**: Select multiple jobs and use "Process Selected" or "Match Selected" buttons with force toggles for targeted processing
+- **Status Management**: Use dropdown menus in the status column to directly select job status (pending, new, applied, expired, rejected, unrelated)
 - **Background Tasks Panel**: A floating card on the right tracks real-time progress for long-running tasks (LLM processing, matching) and stays visible as you scroll without covering the table.
 - **Prompt Settings**: Manage system & user prompts from the **Prompt Settings** page (accessible via the dashboard header) without touching source code
 - **Filtering**: Filter by status, field, level, minimum fit score
 - **Search**: Text search across titles, institutions, and descriptions
 - **Sorting**: Click column headers to sort by fit score, deadline, institution, etc.
 - **Job Details**: Click "View" to see full job description and requirements
-- **Status Updates**: Click "Status" to cycle through application statuses (pending → new → applied → expired → rejected)
+- **Listing ID**: View job listing ID in dedicated column for easy reference
 - **Force Recompute Toggle**: Use "Force full recompute" next to "Match Fit Scores" when you need to refresh every job (default only updates changed postings)
 - **Edit Jobs**: Click "Edit" to modify job information inline, then "Save Changes" to update database
 - **AEA JOE Links**: Direct links to view original job postings on AEA JOE website

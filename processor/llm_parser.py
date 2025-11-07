@@ -232,7 +232,7 @@ EXTRACT_SYSTEM_PROMPT = """You are an expert at parsing job postings. Extract st
 Return a JSON object with the following fields:
 - position_type: Type of position (e.g., "Assistant Professor", "Postdoc", "Research Associate")
 - field: Primary field of economics (e.g., "Public Economics", "Development Economics", "Microeconomics")
-- level: Position level (e.g., "Assistant", "Associate", "Postdoc", "Senior")
+- level: Position level(s) - if multiple levels are mentioned (e.g., "Assistant or Associate Professor"), return ALL levels as a comma-separated string (e.g., "Assistant, Associate"). If only one level, return single value (e.g., "Assistant", "Associate", "Full", "Postdoc", "Senior")
 - requirements: Key requirements and qualifications (as a string)
 - research_areas: List of research areas mentioned
 - teaching_load: Teaching requirements if mentioned
@@ -253,6 +253,7 @@ def _build_extract_prompt(job_description: str) -> str:
         "- For extracted_deadline, parse any date mentioned in the text.\n"
         "- For application_portal_url, look for URLs to application systems, HR portals, or university job sites.\n"
         "- For country, extract the country name from the location information.\n"
+        "- For level, extract ALL position levels mentioned (e.g., if title says 'Assistant or Associate Professor', return 'Assistant, Associate'). Show all levels found, comma-separated.\n"
         "- For application_materials, list all required materials mentioned (CV, cover letter, statements, transcripts, etc.).\n"
         "- For references_separate_email, check if references should be sent to a different email address than the main application."
     )
@@ -371,7 +372,7 @@ def parse_deadlines_batch(
 
 
 CLASSIFY_SYSTEM_PROMPT = """Classify the job position. Return JSON with:
-- level: "Assistant", "Associate", "Full", "Postdoc", "Other"
+- level: Position level(s) - if multiple levels are mentioned (e.g., "Assistant or Associate Professor"), return ALL levels as a comma-separated string (e.g., "Assistant, Associate"). If only one level, return single value: "Assistant", "Associate", "Full", "Postdoc", "Other"
 - type: "Tenure-track", "Tenured", "Non-tenure", "Postdoc", "Other"
 - field_focus: Primary field (e.g., "Public Economics", "Development Economics")"""
 
@@ -381,7 +382,8 @@ def _build_classify_prompt(title: str, description: str) -> str:
         "Classify this position:\n\n"
         f"Title: {title}\n"
         f"Description: {description[:500]}\n\n"
-        "Return only valid JSON."
+        "Return only valid JSON.\n"
+        "For level field: Extract ALL position levels mentioned in the title. If multiple levels are mentioned (e.g., 'Assistant or Associate Professor'), return all levels comma-separated (e.g., 'Assistant, Associate')."
     )
 
 

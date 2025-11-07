@@ -27,6 +27,7 @@ from config.prompt_loader import get_prompts as load_prompts, save_prompts
 from matcher import (
     load_portfolio,
     evaluate_position_track_batch,
+    evaluate_fit_and_difficulty_batch,
 )
 from matcher.fit_calculator import score_job_with_joint_prompt
 
@@ -300,7 +301,7 @@ def _match_job_batch_web(
     portfolio_hash: str,
     force: bool = False,
 ) -> Tuple[int, int, List[Dict[str, Any]], int]:
-    """Process a batch sequentially for the web API.
+    """Process a batch concurrently for the web API, saving each job incrementally as results arrive.
 
     Returns: (batch_saved, batch_errors, sample_results, heuristic_fallbacks)
     """
@@ -312,24 +313,75 @@ def _match_job_batch_web(
     heuristic_fallbacks = 0
     sample_results: List[Dict[str, Any]] = []
 
-    for index, job in enumerate(job_batch, 1):
+    # Filter jobs that need recomputation
+    jobs_to_score = []
+    for job in job_batch:
         job_id = job.get('job_id')
         if not job_id:
-            logger.warning("Skipping job without ID at batch index %d", index)
+            logger.warning("Skipping job without ID")
             continue
+        
+        if force or job.get('fit_score') is None or job.get('difficulty_score') is None:
+            jobs_to_score.append(job)
 
-        _, recomputed, llm_success = score_job_with_joint_prompt(job, portfolio, force=force)
+    if not jobs_to_score:
+        return 0, 0, [], 0
 
-        if not recomputed:
-            logger.info(
-                "[Web] Skipping job %s (ID: %s); scores already populated.",
-                job.get('title', 'Unknown')[:60],
-                job_id,
-            )
+    # Process jobs concurrently using LLM, but save incrementally as each completes
+    logger.info("Processing %d job(s) concurrently with LLM (max concurrency: %d)", 
+                len(jobs_to_score), LLM_MAX_CONCURRENCY)
+    
+    from processor.llm_parser import _get_executor
+    from matcher.llm_fit_evaluator import evaluate_fit_and_difficulty
+    from concurrent.futures import as_completed
+    
+    # Create tasks for concurrent execution
+    tasks = []
+    job_map = {}  # Map job_id to job dict for saving
+    for job in jobs_to_score:
+        job_id = job.get('job_id')
+        if job_id:
+            job_map[job_id] = job
+            # Use default parameter to capture job in closure
+            tasks.append((job_id, lambda j=job: evaluate_fit_and_difficulty(j, portfolio)))
+    
+    # Execute tasks concurrently, processing results incrementally as they complete
+    executor = _get_executor(LLM_MAX_CONCURRENCY)
+    futures = {executor.submit(task): job_id for job_id, task in tasks}
+    
+    completed_count = 0
+    for future in as_completed(futures):
+        job_id = futures[future]
+        job = job_map.get(job_id)
+        if not job:
             continue
+            
+        try:
+            llm_result = future.result()
+        except Exception as exc:
+            logger.error("LLM call failed for job %s: %s", job_id, exc)
+            llm_result = None
 
-        if not llm_success:
+        if llm_result:
+            # LLM succeeded - update job with results
+            job['fit_score'] = round(llm_result['fit_score'], 2)
+            job['fit_reasoning'] = llm_result.get('fit_reasoning', '')
+            job['fit_alignment'] = llm_result.get('fit_alignment', {})
+            job['difficulty_score'] = round(llm_result['difficulty_score'], 2)
+            job['difficulty_reasoning'] = llm_result.get('difficulty_reasoning', '')
+        else:
+            # LLM failed - use heuristic fallback
             heuristic_fallbacks += 1
+            from matcher.fit_calculator import _calculate_fit_score_rule_based
+            job['fit_score'] = _calculate_fit_score_rule_based(job, portfolio)
+            job.setdefault('fit_reasoning', 'Heuristic fit score used (LLM unavailable).')
+            if force or job.get('difficulty_score') is None:
+                job['difficulty_score'] = job.get('difficulty_score') or 50.0
+            if force or not job.get('difficulty_reasoning'):
+                job['difficulty_reasoning'] = job.get(
+                    'difficulty_reasoning',
+                    'LLM difficulty estimation unavailable; heuristic default applied.',
+                )
 
         job['fit_updated_at'] = timestamp
         job['fit_portfolio_hash'] = portfolio_hash
@@ -352,10 +404,21 @@ def _match_job_batch_web(
                 'fit_updated_at': timestamp,
                 'fit_portfolio_hash': portfolio_hash,
             }
+            # Save immediately as each job completes (incremental save)
             if update_job(job_id, update_payload):
                 batch_saved += 1
+                completed_count += 1
                 if len(sample_results) < 5:
                     sample_results.append(response_sample)
+                logger.info(
+                    "[Web] Saved match results for %s (ID: %s): fit=%.2f difficulty=%.2f [%d/%d]",
+                    job.get('title', 'Unknown')[:60],
+                    job_id,
+                    update_payload['fit_score'] or 0.0,
+                    update_payload['difficulty_score'] or 0.0,
+                    completed_count,
+                    len(jobs_to_score),
+                )
             else:
                 batch_errors += 1
         except Exception as exc:
@@ -380,6 +443,10 @@ def api_match_jobs():
                 'error': 'Portfolio text unavailable. Upload CV/research statement first.'
             }), 400
 
+        request_payload = request.get_json() or {}
+        force = bool(request_payload.get('force'))
+        job_ids = request_payload.get('job_ids', None)
+
         jobs = get_all_jobs()
         if not jobs:
             return jsonify({
@@ -387,8 +454,10 @@ def api_match_jobs():
                 'error': 'No jobs available to match.'
             }), 400
 
-        request_payload = request.get_json() or {}
-        force = bool(request_payload.get('force'))
+        # If job_ids provided, filter to only those jobs
+        if job_ids:
+            job_id_set = set(job_ids)
+            jobs = [j for j in jobs if j.get('job_id') in job_id_set]
 
         jobs_with_ids = [job for job in jobs if job.get('job_id')]
         portfolio_hash = hashlib.sha256(combined_text.encode('utf-8')).hexdigest()
@@ -689,13 +758,26 @@ def api_process_jobs():
         logger.info("LLM processing triggered from web interface")
         global operation_progress
         
-        # Get limit from request if provided
+        # Get limit and job_ids from request if provided
         data = request.get_json() or {}
         limit = data.get('limit', None)
+        job_ids = data.get('job_ids', None)
+        force = data.get('force', False)
         
         # Get jobs that need processing
         all_jobs = get_all_jobs()
-        jobs_to_process = [j for j in all_jobs if _job_needs_llm(j)]
+        
+        # If job_ids provided, filter to only those jobs
+        if job_ids:
+            job_id_set = set(job_ids)
+            all_jobs = [j for j in all_jobs if j.get('job_id') in job_id_set]
+        
+        if force:
+            # Force mode: process all provided jobs regardless of current state
+            jobs_to_process = all_jobs
+        else:
+            # Normal mode: only process jobs that need LLM processing
+            jobs_to_process = [j for j in all_jobs if _job_needs_llm(j)]
         
         if limit:
             jobs_to_process = jobs_to_process[:limit]
@@ -849,6 +931,13 @@ def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
                         else:
                             update_data[key] = new_value
                 
+                # Handle level field - ensure comma-separated if multiple levels
+                if 'level' in update_data and isinstance(update_data['level'], (list, tuple)):
+                    update_data['level'] = ', '.join(str(l) for l in update_data['level'])
+                elif 'level' in update_data and isinstance(update_data['level'], str) and ',' in update_data['level']:
+                    # Already comma-separated, keep as is
+                    pass
+                
                 if 'research_areas' in details and details['research_areas']:
                     research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
                     if 'requirements' in update_data:
@@ -888,9 +977,20 @@ def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
 
             track_result = position_track_results.get(job_id) if job_id else None
             if track_result:
-                update_data['position_track'] = track_result[0]
+                # Normalize position track for ambiguous titles
+                from matcher.job_assessor import _normalize_position_track_for_ambiguous_title
+                normalized_track = _normalize_position_track_for_ambiguous_title(job, track_result[0])
+                update_data['position_track'] = normalized_track
             elif not job.get('position_track'):
                 update_data.setdefault('position_track', 'other academia')
+            
+            # Handle level field from classification - ensure comma-separated if multiple levels
+            if 'level' in update_data:
+                if isinstance(update_data['level'], (list, tuple)):
+                    update_data['level'] = ', '.join(str(l) for l in update_data['level'])
+                elif isinstance(update_data['level'], str) and ',' in update_data['level']:
+                    # Already comma-separated, keep as is
+                    pass
 
             valid_db_fields = {
                 'title', 'institution', 'position_type', 'field', 'level',

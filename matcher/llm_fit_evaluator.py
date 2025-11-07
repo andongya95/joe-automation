@@ -243,3 +243,51 @@ def evaluate_fit_and_difficulty(job: Dict[str, Any], portfolio: Dict[str, str]) 
         return None
 
 
+def evaluate_fit_and_difficulty_batch(
+    jobs: List[Dict[str, Any]],
+    portfolio: Dict[str, str],
+    max_workers: Optional[int] = None
+) -> Dict[str, Dict[str, Any]]:
+    """Evaluate multiple jobs concurrently using the joint fit/difficulty LLM prompt.
+
+    Returns a mapping of job_id to result dictionary containing fit/difficulty scores and reasoning.
+    Jobs without IDs are skipped.
+    """
+
+    if not jobs:
+        return {}
+
+    portfolio_text = portfolio.get('combined_text') or ""
+    if not portfolio_text:
+        logger.warning("Portfolio text missing; skipping batch joint fit/difficulty evaluation.")
+        return {}
+
+    from config.settings import LLM_MAX_CONCURRENCY
+    max_workers = max_workers or LLM_MAX_CONCURRENCY
+    max_workers = max(1, max_workers)
+
+    jobs_with_id = [(job.get('job_id'), job) for job in jobs if job.get('job_id')]
+
+    if not jobs_with_id:
+        return {}
+
+    prompts_pair = _load_prompts()
+    portfolio_summary = _truncate_text(portfolio_text, 2500)
+
+    def make_task(job_inner: Dict[str, Any]) -> Callable[[], Optional[Dict[str, Any]]]:
+        def task() -> Optional[Dict[str, Any]]:
+            return evaluate_fit_and_difficulty(job_inner, portfolio)
+
+        return task
+
+    tasks = [(job_id, make_task(job)) for job_id, job in jobs_with_id]
+    task_results = execute_llm_tasks(tasks, max_workers=max_workers)
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for job_id, result in task_results.items():
+        if result:
+            results[job_id] = result
+
+    return results
+
+

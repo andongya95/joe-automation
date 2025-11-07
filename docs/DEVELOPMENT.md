@@ -110,7 +110,7 @@ aea-joe-tool/
 **Field Updates (only if meaningful):**
 - `position_type`: Job type classification
 - `field`: Research field focus
-- `level`: Position level (Assistant, Associate, Full, etc.)
+- `level`: Position level(s) - shows ALL levels if multiple mentioned (e.g., "Assistant, Associate" for "Assistant or Associate Professor")
 - `requirements`: Extracted requirements and research areas
 - `extracted_deadline`: Parsed deadline date
 - `application_portal_url`: Application URL if found
@@ -119,6 +119,10 @@ aea-joe-tool/
 - `references_separate_email`: Boolean flag
 - `requires_separate_application`: Boolean flag
 - `position_track`: Classification (junior tenure-track, senior tenure-track, teaching, industry, non-tenure track, other academia)
+
+**Position Track Normalization:**
+- Ambiguous titles (e.g., "faculty position" without rank) are normalized to default to "junior tenure-track" (assistant level)
+- Applied automatically during LLM processing to ensure consistent classification
 
 **Preservation Logic:**
 - Only updates fields that are currently empty/None OR if new value is more complete
@@ -178,15 +182,24 @@ A job needs fit recomputation if:
 - Overrides all checks and recomputes all jobs
 - Useful when portfolio changes or you want fresh scores
 
-**Caching:**
-- Fit scores are cached based on `fit_updated_at` timestamp
-- Only recomputes if portfolio changed or job updated
-- Prevents unnecessary LLM API calls
+**Difficulty Score Interpretation:**
+- **Lower scores = HIGHER difficulty** (harder to get, lower chance of success)
+- **Higher scores = LOWER difficulty** (easier to get, higher chance of success)
+- Scale: 0 = impossible, 100 = guaranteed
+- Benchmarks:
+  - Top 30 US universities (assistant): < 5 (very difficult, ~5% chance)
+  - Top 5 China universities (assistant): ~10 (difficult, ~10% chance)
+  - Mid-tier R1: 15-30 (moderately difficult)
+  - Regional/less selective: 30-60 (moderate difficulty)
+  - Non-tenure/teaching: 50-80 (moderate to easier)
+  - Senior tenure-track: near 0 (extremely difficult for early-career)
 
 **Execution Pattern:**
-- Still chunks work into batches of `LLM_PROCESSING_BATCH_SIZE` for progress logging
-- Within each batch, jobs run sequentially so the joint prompt can persist results immediately
-- Saves after every job, providing resumability even mid-batch
+- Processes jobs in batches of `LLM_PROCESSING_BATCH_SIZE` for progress logging
+- **Uses concurrent processing** - submits up to `LLM_MAX_CONCURRENCY` (default: 20) LLM calls simultaneously
+- Uses `as_completed()` to process results as they finish
+- **Saves incrementally** - each job is saved immediately when its LLM call completes
+- Provides resumability even mid-batch (if interrupted, completed jobs are already saved)
 - Skips jobs that already have both scores unless force mode is enabled
 - Logs heuristic fallbacks when the LLM call fails and the heuristic score is used
 
@@ -238,11 +251,13 @@ Uses LLMs to extract structured information from job descriptions.
 
 **llm_fit_evaluator.py**: LLM-based fit score evaluation
 - `evaluate_fit_with_llm()`: Single job LLM fit evaluation
-- `evaluate_fit_with_llm_batch()`: Batch LLM fit evaluation
+- `evaluate_fit_with_llm_batch()`: Batch LLM fit evaluation (concurrent)
 - `evaluate_fit_and_difficulty()`: Joint prompt returning both fit and difficulty details per job
+- `evaluate_fit_and_difficulty_batch()`: Concurrent batch evaluation using joint prompt
 
 **job_assessor.py**: Position track and difficulty assessment
 - `evaluate_position_track_batch()`: Classifies position tracks
+- `_normalize_position_track_for_ambiguous_title()`: Normalizes ambiguous titles to junior tenure-track
 
 **Matching Criteria:**
 - Research Alignment (40%)
@@ -372,6 +387,17 @@ You are an experienced economics job-market advisor. Analyze the candidate profi
   "difficulty_reasoning": <string explanation (<= 120 words)>
 }
 Fit focuses on research/qualification alignment; difficulty reflects how challenging it is for the candidate to secure the role given institution selectivity and requirements.
+
+Difficulty Score reflects likelihood of securing the offer (0-100 scale, where 0 = impossible, 100 = guaranteed).
+IMPORTANT: Lower scores mean HIGHER difficulty (harder to get). Higher scores mean LOWER difficulty (easier to get).
+
+Difficulty Score Benchmarks:
+- Top 30 US universities (assistant professor): difficulty_score < 5 (very difficult, low chance ~5%)
+- Top 5 China universities (assistant professor): difficulty_score around 10 (difficult, low chance ~10%)
+- Mid-tier R1 universities: difficulty_score 15-30 (moderately difficult)
+- Regional universities / less selective institutions: difficulty_score 30-60 (moderate difficulty)
+- Non-tenure track / teaching-focused positions: difficulty_score 50-80 (moderate to easier)
+- Senior tenure-track (associate/full): difficulty_score near 0 (extremely difficult for early-career candidates)
 ```
 
 **User Prompt:**
@@ -402,10 +428,11 @@ Return only the JSON structure specified in the system prompt.
 
 ### Concurrency & Rate Limiting
 
-- All LLM helpers share a concurrent executor governed by `LLM_MAX_CONCURRENCY`
+- All LLM helpers share a concurrent executor governed by `LLM_MAX_CONCURRENCY` (default: 20)
 - Rate limiting via `LLM_MIN_CALL_INTERVAL` (minimum time between calls)
 - Gracefully falls back to heuristic logic if API is unavailable
 - Batch processing with incremental saves (20 jobs per batch)
+- **Matching uses concurrent processing** - submits up to `LLM_MAX_CONCURRENCY` parallel calls, saves each job as it completes
 
 ---
 

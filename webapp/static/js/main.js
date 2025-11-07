@@ -266,6 +266,8 @@ function setupEventListeners() {
     document.getElementById('selectAllBtn').addEventListener('click', selectAllVisible);
     document.getElementById('deselectAllBtn').addEventListener('click', deselectAll);
     document.getElementById('bulkUpdateBtn').addEventListener('click', bulkUpdateStatus);
+    document.getElementById('processSelectedBtn').addEventListener('click', processSelectedJobs);
+    document.getElementById('matchSelectedBtn').addEventListener('click', matchSelectedJobs);
     
     // Column settings
     document.getElementById('columnSettingsBtn').addEventListener('click', openColumnSettings);
@@ -300,8 +302,6 @@ function setupEventListeners() {
     document.addEventListener('click', (e) => {
         if (e.target.dataset.action === 'view') {
             viewJobDetails(e.target.dataset.jobId);
-        } else if (e.target.dataset.action === 'status') {
-            updateStatus(e.target.dataset.jobId);
         } else if (e.target.dataset.action === 'edit') {
             enterEditMode(e.target.dataset.jobId);
         }
@@ -509,7 +509,7 @@ function renderJobs() {
     const tbody = document.getElementById('jobsTableBody');
     
     if (filteredJobs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="18" class="loading">No jobs found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="19" class="loading">No jobs found</td></tr>';
         return;
     }
     
@@ -524,10 +524,12 @@ function renderJobs() {
         const difficultyClass = difficultyScore !== null ?
             (difficultyScore <= 15 ? 'difficulty-high' : difficultyScore <= 40 ? 'difficulty-medium' : 'difficulty-low') :
             'difficulty-unknown';
+        const currentStatus = job.application_status || 'new';
         
         return `
             <tr data-job-id="${job.job_id}">
                 <td data-column="checkbox"><input type="checkbox" class="job-checkbox" data-job-id="${job.job_id}" ${isSelected ? 'checked' : ''}></td>
+                <td data-column="job_id">${escapeHtml(job.job_id || 'N/A')}</td>
                 <td data-column="fit_score"><span class="fit-score ${fitScoreClass}">${fitScore.toFixed(1)}</span></td>
                 <td data-column="position_track">${escapeHtml(positionTrack)}</td>
                 <td data-column="difficulty_score"><span class="difficulty-chip ${difficultyClass}">${difficultyDisplay}</span></td>
@@ -539,7 +541,16 @@ function renderJobs() {
                 <td data-column="extracted_deadline">${formatDate(job.extracted_deadline)}</td>
                 <td data-column="location">${escapeHtml(job.location || 'N/A')}</td>
                 <td data-column="country">${escapeHtml(job.country || 'N/A')}</td>
-                <td data-column="status"><span class="status-badge ${statusClass}">${job.application_status || 'new'}</span></td>
+                <td data-column="status">
+                    <select class="status-dropdown" data-job-id="${job.job_id}">
+                        <option value="pending" ${currentStatus === 'pending' ? 'selected' : ''}>pending</option>
+                        <option value="new" ${currentStatus === 'new' ? 'selected' : ''}>new</option>
+                        <option value="applied" ${currentStatus === 'applied' ? 'selected' : ''}>applied</option>
+                        <option value="expired" ${currentStatus === 'expired' ? 'selected' : ''}>expired</option>
+                        <option value="rejected" ${currentStatus === 'rejected' ? 'selected' : ''}>rejected</option>
+                        <option value="unrelated" ${currentStatus === 'unrelated' ? 'selected' : ''}>unrelated</option>
+                    </select>
+                </td>
                 <td data-column="application_materials">${formatApplicationMaterials(job.application_materials)}</td>
                 <td data-column="references_separate_email">${job.references_separate_email ? '<span class="portal-badge">Yes</span>' : '<span style="color: #999;">No</span>'}</td>
                 <td data-column="application_portal">
@@ -559,7 +570,6 @@ function renderJobs() {
                 <td data-column="actions">
                     <div class="action-buttons">
                         <button class="btn btn-view" data-action="view" data-job-id="${job.job_id}">View</button>
-                        <button class="btn btn-status" data-action="status" data-job-id="${job.job_id}">Status</button>
                         <button class="btn btn-edit" data-action="edit" data-job-id="${job.job_id}">Edit</button>
                     </div>
                 </td>
@@ -573,6 +583,11 @@ function renderJobs() {
     // Attach checkbox event listeners after rendering
     document.querySelectorAll('.job-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', handleJobSelection);
+    });
+    
+    // Attach status dropdown event listeners
+    document.querySelectorAll('.status-dropdown').forEach(dropdown => {
+        dropdown.addEventListener('change', handleStatusChange);
     });
     
     // Update select all checkbox state
@@ -634,6 +649,46 @@ async function viewJobDetails(jobId) {
     } catch (error) {
         console.error('Error loading job details:', error);
         alert('Error loading job details');
+    }
+}
+
+// Update job status via dropdown
+async function handleStatusChange(event) {
+    const dropdown = event.target;
+    const jobId = dropdown.dataset.jobId;
+    const newStatus = dropdown.value;
+    
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                application_status: newStatus
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update local data
+            const job = allJobs.find(j => j.job_id === jobId);
+            if (job) {
+                job.application_status = newStatus;
+            }
+            applyFilters();
+            loadStats();
+        } else {
+            // Revert dropdown on error
+            dropdown.value = allJobs.find(j => j.job_id === jobId)?.application_status || 'new';
+            alert('Failed to update status: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error updating status:', error);
+        // Revert dropdown on error
+        dropdown.value = allJobs.find(j => j.job_id === jobId)?.application_status || 'new';
+        alert('Error updating status: ' + error.message);
     }
 }
 
@@ -813,6 +868,102 @@ async function bulkUpdateStatus() {
     } catch (error) {
         console.error('Error updating jobs:', error);
         alert('Error updating jobs: ' + error.message);
+    }
+}
+
+// Process selected jobs with LLM
+async function processSelectedJobs() {
+    const jobIds = Array.from(selectedJobs);
+    
+    if (jobIds.length === 0) {
+        alert('No jobs selected');
+        return;
+    }
+    
+    const forceToggle = document.getElementById('forceProcessToggle');
+    const force = forceToggle ? forceToggle.checked : false;
+    
+    if (!confirm(`Process ${jobIds.length} selected job(s) with LLM${force ? ' (force re-process)' : ''}?`)) {
+        return;
+    }
+    
+    try {
+        showProgressPanel('process');
+        const response = await fetch('/api/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                job_ids: jobIds,
+                force: force
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Successfully processed ${data.processed_count} job(s)`);
+            // Refresh display
+            await loadJobs();
+            applyFilters();
+            loadStats();
+        } else {
+            alert('Failed to process jobs: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error processing jobs:', error);
+        alert('Error processing jobs: ' + error.message);
+    } finally {
+        hideProgressPanel('process');
+    }
+}
+
+// Match selected jobs
+async function matchSelectedJobs() {
+    const jobIds = Array.from(selectedJobs);
+    
+    if (jobIds.length === 0) {
+        alert('No jobs selected');
+        return;
+    }
+    
+    const forceToggle = document.getElementById('forceMatchSelectedToggle');
+    const force = forceToggle ? forceToggle.checked : false;
+    
+    if (!confirm(`Match fit scores for ${jobIds.length} selected job(s)${force ? ' (force recompute)' : ''}?`)) {
+        return;
+    }
+    
+    try {
+        showProgressPanel('match');
+        const response = await fetch('/api/match', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                job_ids: jobIds,
+                force: force
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Successfully matched ${data.updated_count} job(s)`);
+            // Refresh display
+            await loadJobs();
+            applyFilters();
+            loadStats();
+        } else {
+            alert('Failed to match jobs: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error matching jobs:', error);
+        alert('Error matching jobs: ' + error.message);
+    } finally {
+        hideProgressPanel('match');
     }
 }
 
