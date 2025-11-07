@@ -12,6 +12,7 @@
             <h1>AEA JOE Job Postings Dashboard</h1>
             <nav class="main-nav">
                 <a href="{{ url_for('portfolio_page') }}" class="nav-link">Portfolio Management →</a>
+                <a href="{{ url_for('prompts_page') }}" class="nav-link">Prompt Settings →</a>
             </nav>
             <div class="stats-summary" id="statsSummary">
                 <div class="stat-item">
@@ -164,6 +165,12 @@
                 <div id="modalBody"></div>
             </div>
         </div>
+    </div>
+
+    <div id="progressPanel" class="progress-panel hidden">
+        <h3>Background Tasks</h3>
+        <div id="progressProcess" class="progress-item hidden"></div>
+        <div id="progressMatch" class="progress-item hidden"></div>
     </div>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>

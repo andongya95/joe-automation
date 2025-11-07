@@ -19,9 +19,10 @@
 - `README.md`
 - `docs/DEVELOPMENT.md`
 - `.cursor/context.md`
+- `tests/test_progress.py`
 
 ### Tests
-- `python3 -m unittest tests.test_matching_flow`
+- `python3 -m unittest tests.test_matching_flow tests.test_progress`
 
 ## Overview
 This session focused on fixing critical bugs, consolidating checking logic, and implementing batch processing with incremental saves to ensure partial progress is preserved.
@@ -185,4 +186,26 @@ New environment variable:
 2. Monitor API usage with batch size of 20
 3. Adjust `LLM_PROCESSING_BATCH_SIZE` if needed based on performance
 4. Consider adding progress indicators in web UI
+
+## New Feature - Progress Panel & Prompt Editor
+
+### Highlights
+- Added a floating dashboard panel that displays real-time progress for LLM processing and matching, backed by the new `/api/progress` endpoint.
+- Introduced prompt persistence via `config/prompts.json` and a **Prompt Settings** web page that allows editing system/user prompts without code changes.
+- Updated UI components (templates, CSS, JS) to support the panel, prompt editor, and difficulty display tweaks.
+
+### Files Touched
+- `webapp/app.py`
+- `webapp/templates/index.html`
+- `webapp/templates/prompts.html`
+- `webapp/static/js/main.js`
+- `webapp/static/css/style.css`
+- `config/prompt_loader.py`
+- `config/prompts.json`
+- `README.md`
+- `docs/DEVELOPMENT.md`
+- `tests/test_progress.py`
+
+### Tests
+- `python3 -m unittest tests.test_matching_flow tests.test_progress`
 

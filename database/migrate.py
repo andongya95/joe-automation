@@ -47,7 +47,8 @@ def migrate_database():
             'position_track': 'TEXT',
             'difficulty_score': 'REAL',
             'difficulty_reasoning': 'TEXT',
-            'fit_updated_at': 'TIMESTAMP'
+            'fit_updated_at': 'TIMESTAMP',
+            'fit_portfolio_hash': 'TEXT'
         }
         
         for column_name, column_type in new_columns.items():

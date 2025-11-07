@@ -163,6 +163,8 @@ The web interface provides an interactive dashboard for visualizing and managing
 - **Scrape New Jobs**: Click "Scrape New Jobs" button to download latest listings from AEA JOE
 - **Process with LLM**: Click "Process with LLM" button to extract structured information from job descriptions (processes in batches, saves progress)
 - **Match Fit Scores**: Click "Match Fit Scores" button to run the joint fit/difficulty prompt per job (sequential saves, skips already-scored jobs unless "Force" is enabled)
+- **Background Tasks Panel**: A floating card on the right tracks real-time progress for long-running tasks (LLM processing, matching) and stays visible as you scroll without covering the table.
+- **Prompt Settings**: Manage system & user prompts from the **Prompt Settings** page (accessible via the dashboard header) without touching source code
 - **Filtering**: Filter by status, field, level, minimum fit score
 - **Search**: Text search across titles, institutions, and descriptions
 - **Sorting**: Click column headers to sort by fit score, deadline, institution, etc.

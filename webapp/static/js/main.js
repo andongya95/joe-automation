@@ -7,6 +7,10 @@ let editMode = false;
 let editedJobs = {}; // Track edited jobs: {job_id: {field: value}}
 let selectedJobs = new Set(); // Track selected job IDs for bulk operations
 
+const PROGRESS_POLL_INTERVAL_MS = 1000;
+let progressPollInterval = null;
+const activeProgressOps = new Set();
+
 // Column configuration
 const COLUMN_DEFINITIONS = [
     { id: 'checkbox', label: 'Select', defaultWidth: 50, resizable: false },
@@ -39,6 +43,115 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
 });
 
+function showProgressPanel(operation) {
+    activeProgressOps.add(operation);
+    const panel = document.getElementById('progressPanel');
+    if (panel) {
+        panel.classList.remove('hidden');
+    }
+    if (!progressPollInterval) {
+        fetchProgressStatus();
+        progressPollInterval = setInterval(fetchProgressStatus, PROGRESS_POLL_INTERVAL_MS);
+    }
+}
+
+function hideProgressPanel(operation) {
+    activeProgressOps.delete(operation);
+    if (activeProgressOps.size === 0) {
+        if (progressPollInterval) {
+            clearInterval(progressPollInterval);
+            progressPollInterval = null;
+        }
+        const panel = document.getElementById('progressPanel');
+        if (panel) {
+            panel.classList.add('hidden');
+        }
+    }
+}
+
+async function fetchProgressStatus() {
+    if (activeProgressOps.size === 0) {
+        return;
+    }
+    try {
+        const response = await fetch('/api/progress');
+        const data = await response.json();
+        if (data && data.success) {
+            updateProgressPanelContent(data.process, data.match);
+        }
+    } catch (error) {
+        console.debug('Progress polling failed:', error);
+    }
+}
+
+function updateProgressPanelContent(processStatus, matchStatus) {
+    renderProgressItem('progressProcess', processStatus, 'LLM Processing', activeProgressOps.has('process'));
+    renderProgressItem('progressMatch', matchStatus, 'Matching Scores', activeProgressOps.has('match'));
+
+    const panel = document.getElementById('progressPanel');
+    if (!panel) {
+        return;
+    }
+    const processEl = document.getElementById('progressProcess');
+    const matchEl = document.getElementById('progressMatch');
+    if (processEl && matchEl) {
+        const hasVisibleItem = !processEl.classList.contains('hidden') || !matchEl.classList.contains('hidden');
+        if (!hasVisibleItem && activeProgressOps.size === 0) {
+            panel.classList.add('hidden');
+        }
+    }
+}
+
+function renderProgressItem(elementId, progress, label, shouldDisplay) {
+    const el = document.getElementById(elementId);
+    if (!el) {
+        return;
+    }
+    if (!shouldDisplay || !progress) {
+        el.classList.add('hidden');
+        el.innerHTML = '';
+        return;
+    }
+
+    const total = Number(progress.total) || 0;
+    const processed = Number(progress.processed) || 0;
+    const errors = Number(progress.errors) || 0;
+    const status = progress.status || 'idle';
+    const message = progress.message || '';
+
+    let percent = 0;
+    if (total > 0) {
+        percent = Math.min(100, Math.round((processed / total) * 100));
+    } else if (status === 'completed') {
+        percent = 100;
+    }
+
+    let headline = `${label}: ${percent}%`;
+    if (status === 'completed' && percent < 100) {
+        headline = `${label}: Completed`;
+    } else if (status === 'completed') {
+        headline = `${label}: 100%`;
+    } else if (status === 'error') {
+        headline = `${label}: Error`;
+    }
+
+    let body = '';
+    if (total > 0) {
+        body += `<span class="subtext">${processed} / ${total} processed</span>`;
+    } else if (status === 'completed') {
+        body += `<span class="subtext">Completed</span>`;
+    }
+    if (errors > 0) {
+        body += `<span class="subtext error">Errors: ${errors}</span>`;
+    }
+    if (message) {
+        body += `<span class="subtext">${escapeHtml(message)}</span>`;
+    }
+
+    el.innerHTML = `<strong>${headline}</strong>${body}`;
+    el.classList.remove('hidden');
+}
+
 async function callProcessApi(limit = null) {
     const response = await fetch('/api/process', {
         method: 'POST',
@@ -56,6 +169,7 @@ async function callProcessApi(limit = null) {
 }
 
 async function runProcessAfterScrape(autoTriggered = false) {
+    showProgressPanel('process');
     try {
         const data = await callProcessApi();
         const message = `LLM Processing complete!\n${data.message}\n\nProcessed: ${data.processed_count}\nErrors: ${data.error_count}\nTotal: ${data.total_processed}`;
@@ -72,6 +186,8 @@ async function runProcessAfterScrape(autoTriggered = false) {
         console.error('Auto LLM processing failed:', error);
         alert('Auto LLM processing failed: ' + error.message);
         return false;
+    } finally {
+        hideProgressPanel('process');
     }
 }
 
@@ -92,6 +208,7 @@ async function callMatchApi(force = false) {
 }
 
 async function runMatchAfterScrape(autoTriggered = false, force = false) {
+    showProgressPanel('match');
     try {
         const data = await callMatchApi(force);
         let message = `Fit scores updated!\n${data.message}`;
@@ -118,6 +235,8 @@ async function runMatchAfterScrape(autoTriggered = false, force = false) {
         console.error('Auto matching failed:', error);
         alert('Auto matching failed: ' + error.message);
         return false;
+    } finally {
+        hideProgressPanel('match');
     }
 }
 
@@ -401,7 +520,7 @@ function renderJobs() {
         const isSelected = selectedJobs.has(job.job_id);
         const positionTrack = (job.position_track || 'N/A');
         const difficultyScore = typeof job.difficulty_score === 'number' ? job.difficulty_score : null;
-        const difficultyDisplay = difficultyScore !== null ? `${difficultyScore.toFixed(1)}%` : 'N/A';
+        const difficultyDisplay = difficultyScore !== null ? difficultyScore.toFixed(1) : 'N/A';
         const difficultyClass = difficultyScore !== null ?
             (difficultyScore <= 15 ? 'difficulty-high' : difficultyScore <= 40 ? 'difficulty-medium' : 'difficulty-low') :
             'difficulty-unknown';
@@ -1010,6 +1129,7 @@ async function triggerProcess() {
     button.disabled = true;
     button.classList.add('processing');
     button.textContent = 'Processing...';
+    showProgressPanel('process');
     
     try {
         const data = await callProcessApi();
@@ -1025,6 +1145,7 @@ async function triggerProcess() {
         button.disabled = false;
         button.classList.remove('processing');
         button.textContent = originalText;
+        hideProgressPanel('process');
     }
 }
 
@@ -1036,6 +1157,7 @@ async function triggerMatch(forceFull = false) {
     button.disabled = true;
     button.textContent = 'Matching...';
     button.classList.add('processing');
+    showProgressPanel('match');
 
     try {
         const data = await callMatchApi(forceFull);
@@ -1076,6 +1198,7 @@ async function triggerMatch(forceFull = false) {
         button.disabled = false;
         button.textContent = originalText;
         button.classList.remove('processing');
+        hideProgressPanel('match');
     }
 }
 

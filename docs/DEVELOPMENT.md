@@ -92,6 +92,7 @@ aea-joe-tool/
 **Auto-Processing Logic:**
 - If ≤100 new postings: Automatically runs LLM processing + matching
 - If >100 new postings: Warns user to run processing manually
+- Web dashboard displays live batch progress (processing/matching) through the floating status panel powered by `/api/progress`.
 
 **Database Operations:**
 - Creates backup before scraping (if database changed)
@@ -394,6 +395,11 @@ Key Requirements:
 Return only the JSON structure specified in the system prompt.
 ```
 
+**Editing Prompts:**
+- The active system/user prompts are stored in `config/prompts.json` (defaults ship in code).
+- The web dashboard exposes a **Prompt Settings** page (`/prompts`) with side-by-side editors for updating both prompts without modifying source files.
+- Progress feedback for long-running tasks is also surfaced via `/api/progress`, which feeds the floating dashboard widget.
+
 ### Concurrency & Rate Limiting
 
 - All LLM helpers share a concurrent executor governed by `LLM_MAX_CONCURRENCY`
@@ -475,7 +481,7 @@ LLM_PROVIDER = "deepseek"  # or "anthropic", "openai"
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-LLM_MAX_CONCURRENCY = int(os.getenv("LLM_MAX_CONCURRENCY", "3"))
+LLM_MAX_CONCURRENCY = int(os.getenv("LLM_MAX_CONCURRENCY", "20"))
 LLM_MIN_CALL_INTERVAL = float(os.getenv("LLM_MIN_CALL_INTERVAL", "1.0"))
 LLM_PROCESSING_BATCH_SIZE = int(os.getenv("LLM_PROCESSING_BATCH_SIZE", "20"))
 
@@ -492,7 +498,7 @@ PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", "portfolio/")
 - `DEEPSEEK_API_KEY`: DeepSeek API key
 - `OPENAI_API_KEY`: OpenAI API key
 - `ANTHROPIC_API_KEY`: Anthropic API key
-- `LLM_MAX_CONCURRENCY`: Maximum concurrent LLM calls (default: 3)
+- `LLM_MAX_CONCURRENCY`: Maximum concurrent LLM calls (default: 20)
 - `LLM_MIN_CALL_INTERVAL`: Minimum seconds between LLM calls (default: 1.0)
 - `LLM_PROCESSING_BATCH_SIZE`: Jobs per batch (default: 20)
 

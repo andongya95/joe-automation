@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Settings - AEA JOE Automation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container prompts-container">
+        <header>
+            <h1>Prompt Settings</h1>
+            <nav class="main-nav">
+                <a href="{{ url_for('index') }}" class="nav-link">← Back to Dashboard</a>
+                <a href="{{ url_for('portfolio_page') }}" class="nav-link">Portfolio Management →</a>
+            </nav>
+        </header>
+
+        {% if message %}
+            <div class="alert alert-success">{{ message }}</div>
+        {% elif error %}
+            <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" class="prompt-form">
+            <div class="prompts-layout">
+                <div class="prompt-column">
+                    <label for="systemPrompt">System Prompt</label>
+                    <textarea id="systemPrompt" name="system_prompt" spellcheck="false">{{ system_prompt }}</textarea>
+                </div>
+                <div class="prompt-column">
+                    <label for="userPrompt">User Prompt</label>
+                    <textarea id="userPrompt" name="user_prompt" spellcheck="false">{{ user_prompt }}</textarea>
+                </div>
+            </div>
+            <div class="prompt-actions">
+                <button type="submit" class="btn-save">Save Prompts</button>
+                <a href="{{ url_for('index') }}" class="btn-cancel">Cancel</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
+

@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Any, Dict, Optional, Tuple, List, Callable
 
+from config.prompt_loader import DEFAULT_PROMPTS, get_prompts
 from processor.llm_parser import _call_llm, execute_llm_tasks
 
 # Configure logging with datetime prefix
@@ -13,42 +14,6 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-
-SYSTEM_PROMPT = (
-    "You are an experienced economics job-market advisor. "
-    "Given a candidate profile and a job posting, assess how well the candidate fits the job. "
-    "Return JSON with the following structure only:\n"
-    "{\n"
-    "  \"score\": <integer 0-100>,\n"
-    "  \"reasoning\": <string explanation (<= 200 words)>,\n"
-    "  \"alignment\": {\n"
-    "    \"research\": <string>,\n"
-    "    \"teaching\": <string>,\n"
-    "    \"other\": <string>\n"
-    "  }\n"
-    "}\n"
-    "Focus on relevance between research areas, qualifications, teaching expectations, and institutional fit."
-)
-
-
-JOINT_SYSTEM_PROMPT = (
-    "You are an experienced economics job-market advisor. Analyze the candidate profile and the job "
-    "posting to assess BOTH fit and application difficulty. Return JSON with this schema only:\n"
-    "{\n"
-    "  \"fit_score\": <float 0-100>,\n"
-    "  \"fit_reasoning\": <string explanation (<= 200 words)>,\n"
-    "  \"fit_alignment\": {\n"
-    "    \"research\": <string>,\n"
-    "    \"teaching\": <string>,\n"
-    "    \"other\": <string>\n"
-    "  },\n"
-    "  \"difficulty_score\": <float 0-100>,\n"
-    "  \"difficulty_reasoning\": <string explanation (<= 120 words)>\n"
-    "}\n"
-    "Fit focuses on research/qualification alignment; difficulty reflects how challenging it is for the "
-    "candidate to secure the role given institution selectivity and requirements."
-)
 
 
 def _truncate_text(text: str, max_length: int = 2000) -> str:
@@ -65,8 +30,14 @@ def _truncate_text(text: str, max_length: int = 2000) -> str:
     return truncated + " …"
 
 
-def build_fit_prompt(job: Dict[str, Any], portfolio_summary: str) -> str:
-    """Create a structured prompt for the LLM fit evaluation."""
+def _load_prompts() -> Tuple[str, str]:
+    prompts = get_prompts()
+    system_prompt = prompts.get("system_prompt") or DEFAULT_PROMPTS["system_prompt"]
+    user_prompt = prompts.get("user_prompt") or DEFAULT_PROMPTS["user_prompt"]
+    return system_prompt, user_prompt
+
+
+def build_joint_prompt(job: Dict[str, Any], portfolio_summary: str, prompt_template: Optional[str] = None) -> str:
     job_title = job.get('title') or 'Unknown Title'
     institution = job.get('institution') or 'Unknown Institution'
     position_type = job.get('position_type') or job.get('level') or 'N/A'
@@ -74,51 +45,26 @@ def build_fit_prompt(job: Dict[str, Any], portfolio_summary: str) -> str:
     description = _truncate_text(job.get('description', 'No description provided'), 2500)
     requirements = _truncate_text(job.get('requirements', 'No explicit requirements listed.'), 1500)
 
-    prompt = (
-        "Evaluate the candidate's fit for this economics job.\n\n"
-        "== Candidate Summary ==\n"
-        f"{portfolio_summary or 'No portfolio information provided.'}\n\n"
-        "== Job Details ==\n"
-        f"Title: {job_title}\n"
-        f"Institution: {institution}\n"
-        f"Position Type/Level: {position_type}\n"
-        f"Location: {location}\n"
-        "Description:\n"
-        f"{description}\n\n"
-        "Key Requirements:\n"
-        f"{requirements}\n\n"
-        "Return only the JSON structure described in the system prompt."
+    if prompt_template is None:
+        _, prompt_template = _load_prompts()
+
+    prompt = prompt_template.format(
+        portfolio_summary=portfolio_summary or 'No portfolio information provided.',
+        job_title=job_title,
+        institution=institution,
+        position_type=position_type,
+        location=location,
+        description=description,
+        requirements=requirements,
     )
     return prompt
 
 
-def build_joint_prompt(job: Dict[str, Any], portfolio_summary: str) -> str:
-    job_title = job.get('title') or 'Unknown Title'
-    institution = job.get('institution') or 'Unknown Institution'
-    position_type = job.get('position_type') or job.get('level') or 'N/A'
-    location = job.get('location') or job.get('country') or 'N/A'
-    description = _truncate_text(job.get('description', 'No description provided'), 2500)
-    requirements = _truncate_text(job.get('requirements', 'No explicit requirements listed.'), 1500)
-
-    prompt = (
-        "Evaluate the candidate's overall fit and application difficulty for this economics job.\n\n"
-        "== Candidate Summary ==\n"
-        f"{portfolio_summary or 'No portfolio information provided.'}\n\n"
-        "== Job Details ==\n"
-        f"Title: {job_title}\n"
-        f"Institution: {institution}\n"
-        f"Position Type/Level: {position_type}\n"
-        f"Location: {location}\n"
-        "Description:\n"
-        f"{description}\n\n"
-        "Key Requirements:\n"
-        f"{requirements}\n\n"
-        "Return only the JSON structure specified in the system prompt."
-    )
-    return prompt
-
-
-def evaluate_fit_with_llm(job: Dict[str, Any], portfolio: Dict[str, str]) -> Optional[Tuple[float, Dict[str, Any]]]:
+def evaluate_fit_with_llm(
+    job: Dict[str, Any],
+    portfolio: Dict[str, str],
+    prompts: Optional[Tuple[str, str]] = None,
+) -> Optional[Tuple[float, Dict[str, Any]]]:
     """Call the configured LLM to score the job fit.
 
     Returns a tuple of (score, metadata) where metadata includes reasoning/alignment.
@@ -131,10 +77,14 @@ def evaluate_fit_with_llm(job: Dict[str, Any], portfolio: Dict[str, str]) -> Opt
         return None
 
     portfolio_summary = _truncate_text(portfolio_text, 2500)
-    prompt = build_fit_prompt(job, portfolio_summary)
+    if prompts is None:
+        system_prompt, user_prompt = _load_prompts()
+    else:
+        system_prompt, user_prompt = prompts
+    prompt = build_joint_prompt(job, portfolio_summary, prompt_template=user_prompt)
 
     try:
-        response = _call_llm(prompt, SYSTEM_PROMPT)
+        response = _call_llm(prompt, system_prompt)
         if not response:
             logger.error("LLM returned empty response for fit evaluation.")
             return None
@@ -149,10 +99,10 @@ def evaluate_fit_with_llm(job: Dict[str, Any], portfolio: Dict[str, str]) -> Opt
             response = response.strip()
 
         data = json.loads(response)
-        score = data.get('score')
+        score = data.get('fit_score', data.get('score'))
 
         if score is None:
-            logger.error("LLM fit response missing 'score' field.")
+            logger.error("LLM fit response missing 'fit_score'/'score' field.")
             return None
 
         try:
@@ -162,8 +112,8 @@ def evaluate_fit_with_llm(job: Dict[str, Any], portfolio: Dict[str, str]) -> Opt
             return None
 
         metadata = {
-            'reasoning': data.get('reasoning', ''),
-            'alignment': data.get('alignment', {}),
+            'reasoning': data.get('fit_reasoning', data.get('reasoning', '')),
+            'alignment': data.get('fit_alignment', data.get('alignment', {})),
         }
 
         logger.info("LLM fit score computed successfully: %.2f", score_value)
@@ -204,9 +154,11 @@ def evaluate_fit_with_llm_batch(
     if not jobs_with_id:
         return {}
 
+    prompts_pair = _load_prompts()
+
     def make_task(job_inner: Dict[str, Any]) -> Callable[[], Optional[Tuple[float, Dict[str, Any]]]]:
         def task() -> Optional[Tuple[float, Dict[str, Any]]]:
-            return evaluate_fit_with_llm(job_inner, portfolio)
+            return evaluate_fit_with_llm(job_inner, portfolio, prompts=prompts_pair)
 
         return task
 
@@ -232,10 +184,11 @@ def evaluate_fit_and_difficulty(job: Dict[str, Any], portfolio: Dict[str, str]) 
         return None
 
     portfolio_summary = _truncate_text(portfolio_text, 2500)
-    prompt = build_joint_prompt(job, portfolio_summary)
+    system_prompt, user_prompt = _load_prompts()
+    prompt = build_joint_prompt(job, portfolio_summary, prompt_template=user_prompt)
 
     try:
-        response = _call_llm(prompt, JOINT_SYSTEM_PROMPT)
+        response = _call_llm(prompt, system_prompt)
         if not response:
             logger.error("LLM returned empty response for joint fit/difficulty evaluation.")
             return None

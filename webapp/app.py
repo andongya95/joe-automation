@@ -23,6 +23,7 @@ from processor import (
     classify_position_batch,
 )
 from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
+from config.prompt_loader import get_prompts as load_prompts, save_prompts
 from matcher import (
     load_portfolio,
     evaluate_position_track_batch,
@@ -38,6 +39,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+operation_progress = {
+    'process': {
+        'status': 'idle',
+        'processed': 0,
+        'total': 0,
+        'errors': 0,
+        'message': ''
+    },
+    'match': {
+        'status': 'idle',
+        'processed': 0,
+        'total': 0,
+        'errors': 0,
+        'message': ''
+    },
+}
 
 
 # Configure file upload
@@ -68,6 +86,36 @@ def index():
 def portfolio_page():
     """Render the portfolio management page."""
     return render_template('portfolio.html')
+
+
+@app.route('/prompts', methods=['GET', 'POST'])
+def prompts_page():
+    """View and update LLM prompts."""
+    prompts = load_prompts()
+    message = None
+    error = None
+
+    if request.method == 'POST':
+        system_prompt = (request.form.get('system_prompt') or '').strip()
+        user_prompt = (request.form.get('user_prompt') or '').strip()
+
+        if not system_prompt or not user_prompt:
+            error = 'Both prompts are required.'
+        else:
+            save_prompts(system_prompt, user_prompt)
+            prompts = {
+                'system_prompt': system_prompt,
+                'user_prompt': user_prompt,
+            }
+            message = 'Prompts updated successfully.'
+
+    return render_template(
+        'prompts.html',
+        system_prompt=prompts['system_prompt'],
+        user_prompt=prompts['user_prompt'],
+        message=message,
+        error=error,
+    )
 
 
 @app.route('/api/jobs', methods=['GET'])
@@ -322,6 +370,7 @@ def api_match_jobs():
     """Calculate fit scores using portfolio materials and update database."""
     try:
         logger.info("Match fit scores triggered from web interface")
+        global operation_progress
 
         portfolio = load_portfolio()
         combined_text = portfolio.get('combined_text')
@@ -350,6 +399,13 @@ def api_match_jobs():
             jobs_to_score = [job for job in jobs_with_ids if _job_needs_fit_recompute(job, portfolio_hash)]
 
         if not jobs_to_score:
+            operation_progress['match'] = {
+                'status': 'completed',
+                'processed': 0,
+                'total': 0,
+                'errors': 0,
+                'message': 'Fit scores already up-to-date.'
+            }
             return jsonify({
                 'success': True,
                 'message': 'Fit scores already up-to-date; skipped recompute.',
@@ -363,6 +419,15 @@ def api_match_jobs():
             })
 
         logger.info(f"Matching {len(jobs_to_score)} jobs (batch size: {LLM_PROCESSING_BATCH_SIZE})")
+
+        total_jobs = len(jobs_to_score)
+        operation_progress['match'] = {
+            'status': 'running',
+            'processed': 0,
+            'total': total_jobs,
+            'errors': 0,
+            'message': 'Starting matching...'
+        }
         
         total_saved = 0
         total_errors = 0
@@ -391,6 +456,19 @@ def api_match_jobs():
             
             logger.info(f"Match batch {batch_num} complete: {batch_saved} saved, {batch_errors} errors. Total: {total_saved}/{len(jobs_to_score)}")
 
+            operation_progress['match'].update({
+                'processed': min(batch_end, total_jobs),
+                'errors': total_errors,
+                'message': f'Batch {batch_num}/{total_batches} complete.'
+            })
+
+        operation_progress['match'].update({
+            'status': 'completed',
+            'processed': total_jobs,
+            'errors': total_errors,
+            'message': f'Matching complete: {total_saved} updated, {total_errors} errors'
+        })
+
         return jsonify({
             'success': True,
             'message': f'Fit scores updated: {total_saved} jobs, {total_errors} update errors',
@@ -405,10 +483,28 @@ def api_match_jobs():
 
     except Exception as e:
         logger.error(f"Error in api_match_jobs: {e}", exc_info=True)
+        current = operation_progress.get('match', {})
+        operation_progress['match'] = {
+            'status': 'error',
+            'processed': current.get('processed', 0),
+            'total': current.get('total', 0),
+            'errors': current.get('errors', 0),
+            'message': str(e)
+        }
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/progress', methods=['GET'])
+def api_progress_status():
+    """Return progress information for long-running operations."""
+    return jsonify({
+        'success': True,
+        'process': operation_progress.get('process', {}),
+        'match': operation_progress.get('match', {}),
+    })
 
 
 @app.route('/api/fields', methods=['GET'])
@@ -591,6 +687,7 @@ def api_process_jobs():
     """Trigger LLM processing for unprocessed jobs."""
     try:
         logger.info("LLM processing triggered from web interface")
+        global operation_progress
         
         # Get limit from request if provided
         data = request.get_json() or {}
@@ -604,6 +701,32 @@ def api_process_jobs():
             jobs_to_process = jobs_to_process[:limit]
         
         logger.info(f"Processing {len(jobs_to_process)} jobs with LLM (batch size: {LLM_PROCESSING_BATCH_SIZE})")
+
+        total_jobs = len(jobs_to_process)
+
+        if total_jobs == 0:
+            operation_progress['process'] = {
+                'status': 'completed',
+                'processed': 0,
+                'total': 0,
+                'errors': 0,
+                'message': 'No jobs required LLM processing.'
+            }
+            return jsonify({
+                'success': True,
+                'message': 'No jobs required LLM processing.',
+                'processed_count': 0,
+                'error_count': 0,
+                'total_processed': 0
+            })
+
+        operation_progress['process'] = {
+            'status': 'running',
+            'processed': 0,
+            'total': total_jobs,
+            'errors': 0,
+            'message': 'Starting LLM processing...'
+        }
         
         total_processed = 0
         total_errors = 0
@@ -624,6 +747,18 @@ def api_process_jobs():
             
             logger.info(f"Batch {batch_num} complete: {batch_processed} saved, {batch_errors} errors. Total: {total_processed}/{len(jobs_to_process)}")
 
+            operation_progress['process'].update({
+                'processed': min(batch_end, total_jobs),
+                'errors': total_errors,
+                'message': f'Batch {batch_num}/{total_batches} complete.'
+            })
+
+        operation_progress['process'].update({
+            'status': 'completed',
+            'processed': total_jobs,
+            'errors': total_errors,
+            'message': f'LLM processing complete: {total_processed} jobs processed, {total_errors} errors'
+        })
         return jsonify({
             'success': True,
             'message': f'LLM processing complete: {total_processed} jobs processed, {total_errors} errors',
@@ -634,6 +769,14 @@ def api_process_jobs():
         
     except Exception as e:
         logger.error(f"Error in api_process_jobs: {e}", exc_info=True)
+        current = operation_progress.get('process', {})
+        operation_progress['process'] = {
+            'status': 'error',
+            'processed': current.get('processed', 0),
+            'total': current.get('total', 0),
+            'errors': current.get('errors', 0),
+            'message': str(e)
+        }
         return jsonify({
             'success': False,
             'error': str(e)

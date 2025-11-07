@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS job_postings (
     position_track TEXT,
     difficulty_score REAL,
     difficulty_reasoning TEXT,
-    fit_updated_at TIMESTAMP
+    fit_updated_at TIMESTAMP,
+    fit_portfolio_hash TEXT
 );
 """
 
