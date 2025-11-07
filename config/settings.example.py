@@ -15,12 +15,8 @@ PORTFOLIO_PATH = str(BASE_DIR / "portfolio")
 # LLM Provider: 'deepseek', 'openai', or 'anthropic'
 LLM_PROVIDER = 'deepseek'
 
-# API Keys (set via environment variables or update here)
-# For security, use environment variables:
-# export DEEPSEEK_API_KEY="your-key-here"
-# export OPENAI_API_KEY="your-key-here"
-# export ANTHROPIC_API_KEY="your-key-here"
-
+# API Keys
+# Preferred order: environment variables -> config/secret.json -> defaults
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")

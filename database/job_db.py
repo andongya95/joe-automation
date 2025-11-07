@@ -165,6 +165,10 @@ def needs_fit_recompute(job: Dict[str, Any], portfolio_hash: str) -> bool:
     """
     from datetime import datetime
     
+    # Skip recomputation entirely when both scores already exist unless forced externally
+    if job.get('fit_score') is not None and job.get('difficulty_score') is not None:
+        return False
+
     if job.get('fit_score') is None:
         return True
     if not job.get('position_track'):

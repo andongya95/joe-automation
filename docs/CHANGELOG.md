@@ -1,5 +1,28 @@
 # Chat Session Summary - November 7, 2025
 
+## Update - Joint Fit/Difficulty Prompt
+
+### Highlights
+- Replaced the dual fit/difficulty flows with a single joint LLM prompt that returns both scores in one call.
+- Matching now evaluates jobs sequentially inside each batch and saves after every job, skipping entries that already have both scores unless forced.
+- Updated `needs_fit_recompute` so existing scored jobs are bypassed unless one of the scores is missing or force mode is enabled.
+- Aligned README, development docs, and local context with the new workflow.
+
+### Files Touched
+- `database/job_db.py`
+- `main.py`
+- `webapp/app.py`
+- `matcher/fit_calculator.py`
+- `matcher/llm_fit_evaluator.py`
+- `matcher/__init__.py`
+- `tests/test_matching_flow.py`
+- `README.md`
+- `docs/DEVELOPMENT.md`
+- `.cursor/context.md`
+
+### Tests
+- `python3 -m unittest tests.test_matching_flow`
+
 ## Overview
 This session focused on fixing critical bugs, consolidating checking logic, and implementing batch processing with incremental saves to ensure partial progress is preserved.
 

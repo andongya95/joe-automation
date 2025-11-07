@@ -25,10 +25,9 @@ from processor import (
 from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
 from matcher import (
     load_portfolio,
-    calculate_fit_scores_batch,
     evaluate_position_track_batch,
-    evaluate_difficulty_batch,
 )
+from matcher.fit_calculator import score_job_with_joint_prompt
 
 # Configure logging with datetime prefix
 logging.basicConfig(
@@ -247,52 +246,56 @@ def api_get_stats():
         }), 500
 
 
-def _match_job_batch_web(job_batch: List[Dict[str, Any]], portfolio: Dict[str, str], portfolio_hash: str) -> Tuple[int, int, List[Dict[str, Any]], int]:
-    """Process a single batch of jobs for matching and save immediately (web version).
-    
+def _match_job_batch_web(
+    job_batch: List[Dict[str, Any]],
+    portfolio: Dict[str, str],
+    portfolio_hash: str,
+    force: bool = False,
+) -> Tuple[int, int, List[Dict[str, Any]], int]:
+    """Process a batch sequentially for the web API.
+
     Returns: (batch_saved, batch_errors, sample_results, heuristic_fallbacks)
     """
+
     timestamp = datetime.now().isoformat()
-    
-    scored_jobs = calculate_fit_scores_batch(job_batch, portfolio, use_llm=True, max_workers=LLM_MAX_CONCURRENCY)
-    difficulty_results = evaluate_difficulty_batch(job_batch, portfolio, max_workers=LLM_MAX_CONCURRENCY)
-    
+
     batch_saved = 0
     batch_errors = 0
-    sample_results = []
     heuristic_fallbacks = 0
-    
-    # scored_jobs is a list of job dicts with fit_score already set
-    for job in scored_jobs:
+    sample_results: List[Dict[str, Any]] = []
+
+    for index, job in enumerate(job_batch, 1):
         job_id = job.get('job_id')
         if not job_id:
+            logger.warning("Skipping job without ID at batch index %d", index)
             continue
-        
-        difficulty_result = difficulty_results.get(job_id)
-        if difficulty_result:
-            job['difficulty_score'] = round(difficulty_result[0], 2)
-            job['difficulty_reasoning'] = difficulty_result[1]
-        else:
-            job.setdefault('difficulty_score', 50.0)
-            job.setdefault('difficulty_reasoning', 'LLM difficulty estimation unavailable; heuristic default applied.')
-        
+
+        _, recomputed, llm_success = score_job_with_joint_prompt(job, portfolio, force=force)
+
+        if not recomputed:
+            logger.info(
+                "[Web] Skipping job %s (ID: %s); scores already populated.",
+                job.get('title', 'Unknown')[:60],
+                job_id,
+            )
+            continue
+
+        if not llm_success:
+            heuristic_fallbacks += 1
+
         job['fit_updated_at'] = timestamp
         job['fit_portfolio_hash'] = portfolio_hash
-        
-        # Count heuristic fallbacks and collect samples (after setting difficulty_score)
-        if job.get('fit_reasoning', '').startswith('Heuristic fit score'):
-            heuristic_fallbacks += 1
-        if len(sample_results) < 5:
-            sample_results.append({
-                'job_id': job.get('job_id'),
-                'title': job.get('title'),
-                'fit_score': job.get('fit_score'),
-                'position_track': job.get('position_track'),
-                'difficulty_score': job.get('difficulty_score'),
-                'reasoning': job.get('fit_reasoning'),
-                'difficulty_reasoning': job.get('difficulty_reasoning'),
-            })
-        
+
+        response_sample = {
+            'job_id': job.get('job_id'),
+            'title': job.get('title'),
+            'fit_score': job.get('fit_score'),
+            'position_track': job.get('position_track'),
+            'difficulty_score': job.get('difficulty_score'),
+            'reasoning': job.get('fit_reasoning'),
+            'difficulty_reasoning': job.get('difficulty_reasoning'),
+        }
+
         try:
             update_payload = {
                 'fit_score': job.get('fit_score'),
@@ -303,12 +306,14 @@ def _match_job_batch_web(job_batch: List[Dict[str, Any]], portfolio: Dict[str, s
             }
             if update_job(job_id, update_payload):
                 batch_saved += 1
+                if len(sample_results) < 5:
+                    sample_results.append(response_sample)
             else:
                 batch_errors += 1
-        except Exception as e:
-            logger.error(f"Error updating job {job_id}: {e}")
+        except Exception as exc:
+            logger.error(f"Error updating job {job_id}: {exc}")
             batch_errors += 1
-    
+
     return batch_saved, batch_errors, sample_results, heuristic_fallbacks
 
 
@@ -373,7 +378,12 @@ def api_match_jobs():
             
             logger.info(f"Matching batch {batch_num}/{total_batches} ({len(job_batch)} jobs)...")
             
-            batch_saved, batch_errors, batch_samples, batch_fallbacks = _match_job_batch_web(job_batch, portfolio, portfolio_hash)
+            batch_saved, batch_errors, batch_samples, batch_fallbacks = _match_job_batch_web(
+                job_batch,
+                portfolio,
+                portfolio_hash,
+                force=force,
+            )
             total_saved += batch_saved
             total_errors += batch_errors
             heuristic_fallbacks += batch_fallbacks

@@ -33,11 +33,10 @@ from processor import (
 )
 from matcher import (
     load_portfolio,
-    calculate_fit_scores_batch,
     rank_jobs,
     evaluate_position_track_batch,
-    evaluate_difficulty_batch,
 )
+from matcher.fit_calculator import score_job_with_joint_prompt
 from config.settings import VERBOSE, DATABASE_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
 
 
@@ -302,40 +301,47 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
         return 0
 
 
-def _match_job_batch(job_batch: List[Dict[str, Any]], portfolio: Dict[str, str], portfolio_hash: str) -> int:
-    """Process a single batch of jobs for matching and save immediately."""
+def _match_job_batch(
+    job_batch: List[Dict[str, Any]],
+    portfolio: Dict[str, str],
+    portfolio_hash: str,
+    force: bool = False,
+) -> int:
+    """Process a batch sequentially, saving each job after recomputation."""
+
     timestamp = datetime.now().isoformat()
-    
-    scored_jobs = calculate_fit_scores_batch(
-        job_batch,
-        portfolio,
-        use_llm=True,
-        max_workers=LLM_MAX_CONCURRENCY,
-    )
-    difficulty_results = evaluate_difficulty_batch(
-        job_batch,
-        portfolio,
-        max_workers=LLM_MAX_CONCURRENCY,
-    )
-    
     batch_saved = 0
-    # scored_jobs is a list of job dicts with fit_score already set
-    for job in scored_jobs:
+    skipped = 0
+    fallbacks = 0
+
+    for index, job in enumerate(job_batch, 1):
         job_id = job.get('job_id')
         if not job_id:
+            logger.warning("Skipping job without ID at batch index %d", index)
             continue
-        
-        difficulty_result = difficulty_results.get(job_id)
-        if difficulty_result:
-            job['difficulty_score'] = round(difficulty_result[0], 2)
-            job['difficulty_reasoning'] = difficulty_result[1]
-        else:
-            job.setdefault('difficulty_score', 50.0)
-            job.setdefault('difficulty_reasoning', 'LLM difficulty estimation unavailable; heuristic default applied.')
-        
+
+        original_fit = job.get('fit_score')
+        original_difficulty = job.get('difficulty_score')
+
+        _, recomputed, llm_success = score_job_with_joint_prompt(job, portfolio, force=force)
+
+        if not recomputed:
+            skipped += 1
+            logger.info(
+                "Skipping job %s (ID: %s); fit=%s difficulty=%s already set.",
+                job.get('title', 'Unknown')[:60],
+                job_id,
+                original_fit,
+                original_difficulty,
+            )
+            continue
+
+        if not llm_success:
+            fallbacks += 1
+
         job['fit_updated_at'] = timestamp
         job['fit_portfolio_hash'] = portfolio_hash
-        
+
         update_payload = {
             'fit_score': job.get('fit_score'),
             'difficulty_score': job.get('difficulty_score'),
@@ -343,9 +349,24 @@ def _match_job_batch(job_batch: List[Dict[str, Any]], portfolio: Dict[str, str],
             'fit_updated_at': timestamp,
             'fit_portfolio_hash': portfolio_hash,
         }
+
         if update_job(job_id, update_payload):
             batch_saved += 1
-    
+            logger.info(
+                "Saved match results for %s (ID: %s): fit=%.2f difficulty=%.2f",
+                job.get('title', 'Unknown')[:60],
+                job_id,
+                update_payload['fit_score'] or 0.0,
+                update_payload['difficulty_score'] or 0.0,
+            )
+        else:
+            logger.error("Failed to update job %s during matching", job_id)
+
+    if fallbacks:
+        logger.warning("Match batch used heuristic fallback for %d job(s)", fallbacks)
+    if skipped:
+        logger.info("Match batch skipped %d job(s) already scored", skipped)
+
     return batch_saved
 
 
@@ -385,7 +406,7 @@ def match_jobs(jobs: List[Dict[str, Any]], force: bool = False) -> Tuple[List[Di
             
             logger.info(f"Matching batch {batch_num}/{total_batches} ({len(job_batch)} jobs)...")
             
-            batch_saved = _match_job_batch(job_batch, portfolio, portfolio_hash)
+            batch_saved = _match_job_batch(job_batch, portfolio, portfolio_hash, force=force)
             total_saved += batch_saved
             
             logger.info(f"Match batch {batch_num} complete: {batch_saved} jobs saved. Total saved: {total_saved}/{len(jobs_to_score)}")

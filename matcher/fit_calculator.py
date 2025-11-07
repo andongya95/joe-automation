@@ -4,7 +4,11 @@ import logging
 import re
 from typing import Dict, List, Any, Tuple
 
-from .llm_fit_evaluator import evaluate_fit_with_llm, evaluate_fit_with_llm_batch
+from .llm_fit_evaluator import (
+    evaluate_fit_with_llm,
+    evaluate_fit_with_llm_batch,
+    evaluate_fit_and_difficulty,
+)
 
 from config.settings import RESEARCH_FOCAL_AREAS
 
@@ -248,6 +252,71 @@ def calculate_fit_scores_batch(
             job.setdefault('fit_reasoning', 'Heuristic fit score used (LLM unavailable).')
 
         scored_jobs.append(job)
+
+    return rank_jobs(scored_jobs)
+
+
+def score_job_with_joint_prompt(
+    job: Dict[str, Any],
+    portfolio: Dict[str, str],
+    force: bool = False,
+) -> Tuple[Dict[str, Any], bool, bool]:
+    """Score a single job using the joint fit/difficulty LLM prompt (with fallbacks).
+
+    Returns a tuple of (job, recomputed, llm_success).
+    """
+
+    job_id = job.get('job_id')
+    needs_recompute = force or job.get('fit_score') is None or job.get('difficulty_score') is None
+
+    if not job_id:
+        return job, False, False
+
+    if not needs_recompute:
+        return job, False, False
+
+    llm_result = evaluate_fit_and_difficulty(job, portfolio)
+
+    if llm_result:
+        job['fit_score'] = round(llm_result['fit_score'], 2)
+        job['fit_reasoning'] = llm_result.get('fit_reasoning', '')
+        job['fit_alignment'] = llm_result.get('fit_alignment', {})
+        job['difficulty_score'] = round(llm_result['difficulty_score'], 2)
+        job['difficulty_reasoning'] = llm_result.get('difficulty_reasoning', '')
+        return job, True, True
+
+    # Fallbacks when LLM fails
+    job['fit_score'] = _calculate_fit_score_rule_based(job, portfolio)
+    job.setdefault('fit_reasoning', 'Heuristic fit score used (LLM unavailable).')
+
+    if force or job.get('difficulty_score') is None:
+        job['difficulty_score'] = job.get('difficulty_score') or 50.0
+    if force or not job.get('difficulty_reasoning'):
+        job['difficulty_reasoning'] = job.get(
+            'difficulty_reasoning',
+            'LLM difficulty estimation unavailable; heuristic default applied.',
+        )
+
+    return job, True, False
+
+
+def calculate_fit_scores_with_difficulty(
+    jobs: List[Dict[str, Any]],
+    portfolio: Dict[str, str],
+    force: bool = False,
+) -> List[Dict[str, Any]]:
+    """Sequentially calculate fit and difficulty scores using the joint prompt."""
+
+    if not jobs:
+        return []
+
+    scored_jobs: List[Dict[str, Any]] = []
+
+    for job in jobs:
+        # Work on a mutable copy to avoid side effects when caller reuses dicts
+        updated_job = dict(job)
+        score_job_with_joint_prompt(updated_job, portfolio, force=force)
+        scored_jobs.append(updated_job)
 
     return rank_jobs(scored_jobs)
 

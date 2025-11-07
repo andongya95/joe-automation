@@ -29,6 +29,7 @@ ENV/
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
@@ -40,6 +41,7 @@ config/.env
 
 # Configuration (contains API keys)
 config/settings.py
+config/secret.json
 
 # Database
 *.db

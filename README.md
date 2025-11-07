@@ -112,7 +112,7 @@ The script automatically uses the Python interpreter on your `$PATH` (override w
 - `--update`: Scrape and download latest job listings
 - `--process`: Process jobs with LLM incrementally (processes in batches, saves after each batch)
 - `--process-limit N`: Limit number of jobs to process (default: all)
-- `--match`: Calculate fit scores for all jobs (processes in batches, saves after each batch)
+- `--match`: Calculate fit & difficulty scores sequentially per job (saves after each job, skips already-scored entries unless `--force-match`)
 - `--export`: Export results to CSV file
 - `--import-csv PATH`: Import changes from CSV file and update database
 - `--web`: Start web server for database visualization
@@ -124,7 +124,7 @@ The script automatically uses the Python interpreter on your `$PATH` (override w
 
 1. **Scrape & Save**: Download latest job postings and save raw data to database (`--update`)
 2. **Process with LLM**: Extract structured information in batches, saving after each batch (`--process`)
-3. **Match**: Calculate fit scores based on portfolio in batches, saving after each batch (`--match`)
+3. **Match**: Run the joint fit/difficulty prompt job-by-job, saving after each update and only recomputing if either score is missing (or when forced) (`--match`)
 4. **Export**: Export to CSV for visualization and editing (`--export`)
 5. **Import**: Import changes from CSV back to database (`--import-csv`)
 6. **Web Interface**: Use web dashboard for interactive management (`--web`)
@@ -162,7 +162,7 @@ The web interface provides an interactive dashboard for visualizing and managing
 - **Statistics Dashboard**: View total jobs, counts by status, average fit score
 - **Scrape New Jobs**: Click "Scrape New Jobs" button to download latest listings from AEA JOE
 - **Process with LLM**: Click "Process with LLM" button to extract structured information from job descriptions (processes in batches, saves progress)
-- **Match Fit Scores**: Click "Match Fit Scores" button to calculate fit and difficulty scores (processes in batches, saves progress)
+- **Match Fit Scores**: Click "Match Fit Scores" button to run the joint fit/difficulty prompt per job (sequential saves, skips already-scored jobs unless "Force" is enabled)
 - **Filtering**: Filter by status, field, level, minimum fit score
 - **Search**: Text search across titles, institutions, and descriptions
 - **Sorting**: Click column headers to sort by fit score, deadline, institution, etc.

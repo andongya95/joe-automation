@@ -151,6 +151,7 @@ A job needs LLM processing if ANY of these fields are empty:
 - Calculates fit scores based on portfolio alignment
 - Estimates application difficulty (0-100 scale)
 - Updates fit-related metadata
+- Uses a single joint LLM prompt to return both fit and difficulty context per job
 
 **Field Updates:**
 - `fit_score`: Portfolio alignment score (0-100)
@@ -163,12 +164,12 @@ A job needs LLM processing if ANY of these fields are empty:
 
 **Needs Recompute Check (`needs_fit_recompute`):**
 A job needs fit recomputation if:
-- `fit_score` is None
+- Either `fit_score` or `difficulty_score` is missing
 - `position_track` is missing (needs LLM processing first)
-- `difficulty_score` is None
 - `fit_portfolio_hash` doesn't match current portfolio hash
 - `fit_updated_at` is missing
 - Job was updated after last fit calculation (`last_updated` > `fit_updated_at`)
+- Force mode overrides the skip logic and recomputes regardless of existing scores
 
 **Unified Function**: `database.needs_fit_recompute(job, portfolio_hash)` - single source of truth used by both CLI and web interface.
 
@@ -181,13 +182,12 @@ A job needs fit recomputation if:
 - Only recomputes if portfolio changed or job updated
 - Prevents unnecessary LLM API calls
 
-**Concurrency & Batch Processing:**
-- Uses `ThreadPoolExecutor` for parallel LLM calls
-- Calculates fit scores and difficulty scores concurrently
-- **Processes in batches of 20 jobs** (configurable via `LLM_PROCESSING_BATCH_SIZE`)
-- **Saves after each batch completes** (not after all jobs finish)
-- Logs progress: "Match batch X/Y complete: N saved"
-- If interrupted, completed batches are preserved
+**Execution Pattern:**
+- Still chunks work into batches of `LLM_PROCESSING_BATCH_SIZE` for progress logging
+- Within each batch, jobs run sequentially so the joint prompt can persist results immediately
+- Saves after every job, providing resumability even mid-batch
+- Skips jobs that already have both scores unless force mode is enabled
+- Logs heuristic fallbacks when the LLM call fails and the heuristic score is used
 
 ---
 
@@ -229,18 +229,19 @@ Uses LLMs to extract structured information from job descriptions.
 
 ### Matcher Module (`matcher/`)
 
-**fit_calculator.py**: Calculates job fit scores based on portfolio alignment
+**fit_calculator.py**: Calculates job fit/difficulty scores based on portfolio alignment
 - `calculate_fit_score()`: Single job fit calculation
-- `calculate_fit_scores_batch()`: Batch fit calculation with LLM fallback
+- `calculate_fit_scores_with_difficulty()`: Sequential fit/difficulty calculation using the joint prompt
+- `score_job_with_joint_prompt()`: Helper that wraps the joint LLM call with heuristic fallbacks
 - `rank_jobs()`: Ranks jobs by fit score
 
 **llm_fit_evaluator.py**: LLM-based fit score evaluation
 - `evaluate_fit_with_llm()`: Single job LLM fit evaluation
 - `evaluate_fit_with_llm_batch()`: Batch LLM fit evaluation
+- `evaluate_fit_and_difficulty()`: Joint prompt returning both fit and difficulty details per job
 
 **job_assessor.py**: Position track and difficulty assessment
 - `evaluate_position_track_batch()`: Classifies position tracks
-- `evaluate_difficulty_batch()`: Estimates application difficulty
 
 **Matching Criteria:**
 - Research Alignment (40%)
@@ -262,6 +263,7 @@ The LLM processing performs several tasks to extract structured information from
 4. **Position Track Classification**: Assigns each posting to a track category
 5. **Difficulty Estimation**: Scores application difficulty based on portfolio and job requirements
 6. **Fit Evaluation**: Evaluates portfolio alignment with job requirements
+7. **Joint Fit/Difficulty Prompt**: Consolidates matching calls into a single LLM evaluation per job
 
 ### LLM Prompts
 
@@ -352,27 +354,44 @@ Description:
 {description}
 ```
 
-#### 5. Difficulty Estimator (`evaluate_difficulty_batch`)
+#### 5. Joint Fit & Difficulty (`evaluate_fit_and_difficulty`)
 
 **System Prompt:**
 ```
-You are advising a candidate about the difficulty of securing a specific job. Consider the candidate portfolio summary, institution reputation, experience level, and description requirements. Provide a feasibility score between 0 and 100 (0 = impossible, 100 = guaranteed). The candidate is early-career, with strengths aligned to the provided portfolio summary. Return ONLY JSON: {"difficulty_score": <0-100 float>, "reasoning": <string>}
-General guidance:
-- Senior tenure-track roles (associate/full) should be near 0.
-- Top 30 US universities for assistant professor are <5.
-- Top 5 China universities assistant professor around 10.
-- Adjust sensibly for less selective institutions or non-tenure roles.
+You are an experienced economics job-market advisor. Analyze the candidate profile and the job posting to assess BOTH fit and application difficulty. Return JSON with this schema only:
+{
+  "fit_score": <float 0-100>,
+  "fit_reasoning": <string explanation (<= 200 words)>,
+  "fit_alignment": {
+    "research": <string>,
+    "teaching": <string>,
+    "other": <string>
+  },
+  "difficulty_score": <float 0-100>,
+  "difficulty_reasoning": <string explanation (<= 120 words)>
+}
+Fit focuses on research/qualification alignment; difficulty reflects how challenging it is for the candidate to secure the role given institution selectivity and requirements.
 ```
 
 **User Prompt:**
 ```
-Candidate Portfolio Summary:
+Evaluate the candidate's overall fit and application difficulty for this economics job.
+
+== Candidate Summary ==
 {portfolio_summary}
 
-Job Snapshot:
-{job_snapshot}
+== Job Details ==
+Title: {job_title}
+Institution: {institution}
+Position Type/Level: {position_type}
+Location: {location}
+Description:
+{description}
 
-Estimate the feasibility for THIS candidate.
+Key Requirements:
+{requirements}
+
+Return only the JSON structure specified in the system prompt.
 ```
 
 ### Concurrency & Rate Limiting
