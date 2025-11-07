@@ -5,12 +5,34 @@ let currentSort = { column: 'fit_score', order: 'desc' };
 let expandedJobId = null;
 let editMode = false;
 let editedJobs = {}; // Track edited jobs: {job_id: {field: value}}
+let selectedJobs = new Set(); // Track selected job IDs for bulk operations
+
+// Column configuration
+const COLUMN_DEFINITIONS = [
+    { id: 'checkbox', label: 'Select', defaultWidth: 50, resizable: false },
+    { id: 'fit_score', label: 'Fit Score', defaultWidth: 100, resizable: true },
+    { id: 'title', label: 'Title', defaultWidth: 200, resizable: true },
+    { id: 'institution', label: 'Institution', defaultWidth: 180, resizable: true },
+    { id: 'field', label: 'Field', defaultWidth: 150, resizable: true },
+    { id: 'level', label: 'Level', defaultWidth: 120, resizable: true },
+    { id: 'deadline', label: 'Deadline', defaultWidth: 110, resizable: true },
+    { id: 'extracted_deadline', label: 'Extracted Deadline', defaultWidth: 140, resizable: true },
+    { id: 'location', label: 'Location', defaultWidth: 150, resizable: true },
+    { id: 'country', label: 'Country', defaultWidth: 120, resizable: true },
+    { id: 'status', label: 'Status', defaultWidth: 100, resizable: true },
+    { id: 'application_materials', label: 'Application Materials', defaultWidth: 250, resizable: true },
+    { id: 'references_separate_email', label: 'Refs Separate Email', defaultWidth: 140, resizable: true },
+    { id: 'application_portal', label: 'Application Portal', defaultWidth: 150, resizable: true },
+    { id: 'link', label: 'Link', defaultWidth: 80, resizable: true },
+    { id: 'actions', label: 'Actions', defaultWidth: 150, resizable: true }
+];
+
+let columnConfig = loadColumnConfig();
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadStats();
-    loadFields();
-    loadLevels();
+    loadFilters();
     loadJobs();
     setupEventListeners();
 });
@@ -21,6 +43,7 @@ function setupEventListeners() {
     document.getElementById('filterStatus').addEventListener('change', applyFilters);
     document.getElementById('filterField').addEventListener('change', applyFilters);
     document.getElementById('filterLevel').addEventListener('change', applyFilters);
+    document.getElementById('filterCountry').addEventListener('change', applyFilters);
     document.getElementById('filterMinScore').addEventListener('input', applyFilters);
     document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
     document.getElementById('clearFilters').addEventListener('click', clearFilters);
@@ -28,6 +51,26 @@ function setupEventListeners() {
     document.getElementById('processButton').addEventListener('click', triggerProcess);
     document.getElementById('saveButton').addEventListener('click', saveEdits);
     document.getElementById('cancelEditButton').addEventListener('click', cancelEdit);
+    
+    // Bulk selection
+    document.getElementById('selectAllCheckbox').addEventListener('change', toggleSelectAll);
+    document.getElementById('selectAllBtn').addEventListener('click', selectAllVisible);
+    document.getElementById('deselectAllBtn').addEventListener('click', deselectAll);
+    document.getElementById('bulkUpdateBtn').addEventListener('click', bulkUpdateStatus);
+    
+    // Column settings
+    document.getElementById('columnSettingsBtn').addEventListener('click', openColumnSettings);
+    document.getElementById('closeColumnSettings').addEventListener('click', closeColumnSettings);
+    document.getElementById('saveColumnSettings').addEventListener('click', saveColumnSettings);
+    document.getElementById('resetColumnSettings').addEventListener('click', resetColumnSettings);
+    
+    // Close modal when clicking outside
+    window.addEventListener('click', (e) => {
+        const modal = document.getElementById('columnSettingsModal');
+        if (e.target === modal) {
+            closeColumnSettings();
+        }
+    });
     
     // Sortable columns
     document.querySelectorAll('.sortable').forEach(th => {
@@ -83,43 +126,50 @@ async function loadStats() {
     }
 }
 
-// Load fields for filter
-async function loadFields() {
+// Load filters (fields, levels, countries)
+async function loadFilters() {
     try {
-        const response = await fetch('/api/fields');
-        const data = await response.json();
+        const [fieldsRes, levelsRes, countriesRes] = await Promise.all([
+            fetch('/api/fields'),
+            fetch('/api/levels'),
+            fetch('/api/countries')
+        ]);
         
-        if (data.success) {
-            const select = document.getElementById('filterField');
-            data.fields.forEach(field => {
+        const fieldsData = await fieldsRes.json();
+        const levelsData = await levelsRes.json();
+        const countriesData = await countriesRes.json();
+        
+        if (fieldsData.success) {
+            const filterField = document.getElementById('filterField');
+            fieldsData.fields.forEach(field => {
                 const option = document.createElement('option');
                 option.value = field;
                 option.textContent = field;
-                select.appendChild(option);
+                filterField.appendChild(option);
             });
         }
-    } catch (error) {
-        console.error('Error loading fields:', error);
-    }
-}
-
-// Load levels for filter
-async function loadLevels() {
-    try {
-        const response = await fetch('/api/levels');
-        const data = await response.json();
         
-        if (data.success) {
-            const select = document.getElementById('filterLevel');
-            data.levels.forEach(level => {
+        if (levelsData.success) {
+            const filterLevel = document.getElementById('filterLevel');
+            levelsData.levels.forEach(level => {
                 const option = document.createElement('option');
                 option.value = level;
                 option.textContent = level;
-                select.appendChild(option);
+                filterLevel.appendChild(option);
+            });
+        }
+        
+        if (countriesData.success) {
+            const filterCountry = document.getElementById('filterCountry');
+            countriesData.countries.forEach(country => {
+                const option = document.createElement('option');
+                option.value = country;
+                option.textContent = country;
+                filterCountry.appendChild(option);
             });
         }
     } catch (error) {
-        console.error('Error loading levels:', error);
+        console.error('Error loading filters:', error);
     }
 }
 
@@ -151,13 +201,17 @@ function applyFilters() {
     const status = document.getElementById('filterStatus').value;
     const field = document.getElementById('filterField').value;
     const level = document.getElementById('filterLevel').value;
+    const country = document.getElementById('filterCountry').value;
     const minScore = document.getElementById('filterMinScore').value;
     const search = document.getElementById('searchInput').value.toLowerCase();
     
     filteredJobs = allJobs.filter(job => {
+        // By default, exclude "unrelated" jobs unless explicitly filtered
+        if (!status && job.application_status === 'unrelated') return false;
         if (status && job.application_status !== status) return false;
         if (field && job.field !== field) return false;
         if (level && job.level !== level) return false;
+        if (country && job.country !== country) return false;
         if (minScore && (job.fit_score || 0) < parseFloat(minScore)) return false;
         if (search) {
             const searchText = search.toLowerCase();
@@ -226,7 +280,7 @@ function renderJobs() {
     const tbody = document.getElementById('jobsTableBody');
     
     if (filteredJobs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="loading">No jobs found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="16" class="loading">No jobs found</td></tr>';
         return;
     }
     
@@ -234,21 +288,38 @@ function renderJobs() {
         const fitScore = job.fit_score || 0;
         const fitScoreClass = fitScore >= 70 ? 'fit-score-high' : fitScore >= 40 ? 'fit-score-medium' : 'fit-score-low';
         const statusClass = `status-${job.application_status || 'new'}`;
+        const isSelected = selectedJobs.has(job.job_id);
         
         return `
             <tr data-job-id="${job.job_id}">
-                <td><span class="fit-score ${fitScoreClass}">${fitScore.toFixed(1)}</span></td>
-                <td>${escapeHtml(job.title || 'N/A')}</td>
-                <td>${escapeHtml(job.institution || 'N/A')}</td>
-                <td>${escapeHtml(job.field || 'N/A')}</td>
-                <td>${escapeHtml(job.level || 'N/A')}</td>
-                <td>${formatDate(job.deadline)}</td>
-                <td>${escapeHtml(job.location || 'N/A')}</td>
-                <td><span class="status-badge ${statusClass}">${job.application_status || 'new'}</span></td>
-                <td>
-                    <a href="https://www.aeaweb.org/joe/listing/${job.job_id}" target="_blank" class="joe-link">View on JOE</a>
+                <td data-column="checkbox"><input type="checkbox" class="job-checkbox" data-job-id="${job.job_id}" ${isSelected ? 'checked' : ''}></td>
+                <td data-column="fit_score"><span class="fit-score ${fitScoreClass}">${fitScore.toFixed(1)}</span></td>
+                <td data-column="title">${escapeHtml(job.title || 'N/A')}</td>
+                <td data-column="institution">${escapeHtml(job.institution || 'N/A')}</td>
+                <td data-column="field">${escapeHtml(job.field || 'N/A')}</td>
+                <td data-column="level">${escapeHtml(job.level || 'N/A')}</td>
+                <td data-column="deadline">${formatDate(job.deadline)}</td>
+                <td data-column="extracted_deadline">${formatDate(job.extracted_deadline)}</td>
+                <td data-column="location">${escapeHtml(job.location || 'N/A')}</td>
+                <td data-column="country">${escapeHtml(job.country || 'N/A')}</td>
+                <td data-column="status"><span class="status-badge ${statusClass}">${job.application_status || 'new'}</span></td>
+                <td data-column="application_materials">${formatApplicationMaterials(job.application_materials)}</td>
+                <td data-column="references_separate_email">${job.references_separate_email ? '<span class="portal-badge">Yes</span>' : '<span style="color: #999;">No</span>'}</td>
+                <td data-column="application_portal">
+                    ${job.requires_separate_application ? 
+                        (job.application_portal_url ? 
+                            `<a href="${escapeHtml(job.application_portal_url)}" target="_blank" class="btn-portal">Apply</a>` : 
+                            '<span class="portal-badge">Yes</span>') : 
+                        '<span style="color: #999;">No</span>'
+                    }
                 </td>
-                <td>
+                <td data-column="link">
+                    ${job.job_id && /^\d+$/.test(job.job_id) ? 
+                        `<a href="https://www.aeaweb.org/joe/listing.php?JOE_ID=${job.job_id}" target="_blank" class="btn-view-joe">View</a>` : 
+                        '<span style="color: #999;">N/A</span>'
+                    }
+                </td>
+                <td data-column="actions">
                     <div class="action-buttons">
                         <button class="btn btn-view" data-action="view" data-job-id="${job.job_id}">View</button>
                         <button class="btn btn-status" data-action="status" data-job-id="${job.job_id}">Status</button>
@@ -258,6 +329,21 @@ function renderJobs() {
             </tr>
         `;
     }).join('');
+    
+    // Update bulk actions visibility
+    updateBulkActionsVisibility();
+    
+    // Attach checkbox event listeners after rendering
+    document.querySelectorAll('.job-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', handleJobSelection);
+    });
+    
+    // Update select all checkbox state
+    updateSelectAllCheckbox();
+    
+    // Apply column configuration after rendering
+    applyColumnConfig();
+    setupColumnResizing();
 }
 
 // View job details
@@ -363,9 +449,134 @@ function clearFilters() {
     document.getElementById('filterStatus').value = '';
     document.getElementById('filterField').value = '';
     document.getElementById('filterLevel').value = '';
+    document.getElementById('filterCountry').value = '';
     document.getElementById('filterMinScore').value = '';
     document.getElementById('searchInput').value = '';
     applyFilters();
+}
+
+// Bulk selection functions
+function handleJobSelection(event) {
+    const jobId = event.target.dataset.jobId;
+    if (event.target.checked) {
+        selectedJobs.add(jobId);
+    } else {
+        selectedJobs.delete(jobId);
+    }
+    updateBulkActionsVisibility();
+    updateSelectAllCheckbox();
+}
+
+function toggleSelectAll(event) {
+    const checked = event.target.checked;
+    document.querySelectorAll('.job-checkbox').forEach(checkbox => {
+        checkbox.checked = checked;
+        const jobId = checkbox.dataset.jobId;
+        if (checked) {
+            selectedJobs.add(jobId);
+        } else {
+            selectedJobs.delete(jobId);
+        }
+    });
+    updateBulkActionsVisibility();
+}
+
+function selectAllVisible() {
+    filteredJobs.forEach(job => {
+        selectedJobs.add(job.job_id);
+    });
+    document.querySelectorAll('.job-checkbox').forEach(checkbox => {
+        checkbox.checked = true;
+    });
+    updateBulkActionsVisibility();
+    updateSelectAllCheckbox();
+}
+
+function deselectAll() {
+    selectedJobs.clear();
+    document.querySelectorAll('.job-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    document.getElementById('selectAllCheckbox').checked = false;
+    updateBulkActionsVisibility();
+}
+
+function updateBulkActionsVisibility() {
+    const bulkActions = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    const count = selectedJobs.size;
+    
+    if (count > 0) {
+        bulkActions.style.display = 'flex';
+        selectedCount.textContent = `${count} selected`;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+function updateSelectAllCheckbox() {
+    const checkboxes = document.querySelectorAll('.job-checkbox');
+    const allChecked = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+    const someChecked = Array.from(checkboxes).some(cb => cb.checked);
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    
+    selectAllCheckbox.checked = allChecked;
+    selectAllCheckbox.indeterminate = someChecked && !allChecked;
+}
+
+async function bulkUpdateStatus() {
+    const status = document.getElementById('bulkStatusSelect').value;
+    const jobIds = Array.from(selectedJobs);
+    
+    if (jobIds.length === 0) {
+        alert('No jobs selected');
+        return;
+    }
+    
+    if (!confirm(`Update ${jobIds.length} job(s) to status "${status}"?`)) {
+        return;
+    }
+    
+    try {
+        const updates = {};
+        jobIds.forEach(jobId => {
+            updates[jobId] = { application_status: status };
+        });
+        
+        const response = await fetch('/api/jobs/batch', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ updates })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update local state
+            jobIds.forEach(jobId => {
+                const job = allJobs.find(j => j.job_id === jobId);
+                if (job) {
+                    job.application_status = status;
+                }
+            });
+            
+            // Clear selection
+            deselectAll();
+            
+            // Refresh display
+            applyFilters();
+            loadStats();
+            
+            alert(`Successfully updated ${data.updated_count} job(s) to "${status}"`);
+        } else {
+            alert('Failed to update jobs: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error updating jobs:', error);
+        alert('Error updating jobs: ' + error.message);
+    }
 }
 
 // Utility functions
@@ -375,6 +586,32 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function formatApplicationMaterials(materials) {
+    if (!materials) {
+        return '<span style="color: #999;">N/A</span>';
+    }
+    
+    // Handle both string (comma-separated) and array formats
+    let items = [];
+    if (typeof materials === 'string') {
+        // Split by comma, clean up whitespace, filter empty strings
+        items = materials.split(',').map(item => item.trim()).filter(item => item.length > 0);
+    } else if (Array.isArray(materials)) {
+        items = materials.map(item => typeof item === 'string' ? item.trim() : String(item)).filter(item => item.length > 0);
+    } else {
+        items = [String(materials)];
+    }
+    
+    if (items.length === 0) {
+        return '<span style="color: #999;">N/A</span>';
+    }
+    
+    // Format as bulleted list with line breaks
+    return '<ul style="margin: 0; padding-left: 20px; list-style-type: disc;">' +
+           items.map(item => `<li style="margin: 2px 0;">${escapeHtml(item)}</li>`).join('') +
+           '</ul>';
+}
+
 function formatDate(dateString) {
     if (!dateString) return 'N/A';
     try {
@@ -382,6 +619,183 @@ function formatDate(dateString) {
         return date.toLocaleDateString();
     } catch {
         return dateString;
+    }
+}
+
+// Column configuration functions
+function loadColumnConfig() {
+    const saved = localStorage.getItem('columnConfig');
+    if (saved) {
+        try {
+            return JSON.parse(saved);
+        } catch (e) {
+            console.error('Error loading column config:', e);
+        }
+    }
+    // Default config: all columns visible with default widths
+    const defaultConfig = {};
+    COLUMN_DEFINITIONS.forEach(col => {
+        defaultConfig[col.id] = {
+            visible: true,
+            width: col.defaultWidth
+        };
+    });
+    return defaultConfig;
+}
+
+function saveColumnConfig() {
+    localStorage.setItem('columnConfig', JSON.stringify(columnConfig));
+}
+
+function applyColumnConfig() {
+    // Apply column widths
+    COLUMN_DEFINITIONS.forEach(col => {
+        const config = columnConfig[col.id];
+        const width = config && config.width ? config.width : col.defaultWidth;
+        const th = document.querySelector(`th[data-column="${col.id}"]`);
+        if (th) {
+            th.style.width = width + 'px';
+            th.style.minWidth = width + 'px';
+        }
+        // Also apply to cells
+        document.querySelectorAll(`td[data-column="${col.id}"]`).forEach(td => {
+            td.style.width = width + 'px';
+            td.style.minWidth = width + 'px';
+        });
+    });
+    
+    // Apply column visibility
+    COLUMN_DEFINITIONS.forEach(col => {
+        const config = columnConfig[col.id];
+        const visible = config ? config.visible !== false : true;
+        
+        // Hide/show header
+        const th = document.querySelector(`th[data-column="${col.id}"]`);
+        if (th) {
+            th.style.display = visible ? '' : 'none';
+        }
+        
+        // Hide/show cells
+        document.querySelectorAll(`td[data-column="${col.id}"]`).forEach(td => {
+            td.style.display = visible ? '' : 'none';
+        });
+    });
+}
+
+function setupColumnResizing() {
+    COLUMN_DEFINITIONS.forEach(col => {
+        if (!col.resizable) return;
+        
+        const th = document.querySelector(`th[data-column="${col.id}"]`);
+        if (!th) return;
+        
+        // Skip if resize handle already exists
+        if (th.querySelector('.resize-handle')) return;
+        
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+        
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'resize-handle';
+        resizeHandle.style.cssText = 'position: absolute; right: 0; top: 0; width: 5px; height: 100%; cursor: col-resize; background: transparent; z-index: 10;';
+        th.style.position = 'relative';
+        th.appendChild(resizeHandle);
+        
+        resizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.pageX;
+            startWidth = th.offsetWidth;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const diff = e.pageX - startX;
+            const newWidth = Math.max(50, startWidth + diff);
+            th.style.width = newWidth + 'px';
+            th.style.minWidth = newWidth + 'px';
+            
+            // Update all cells in this column
+            document.querySelectorAll(`td[data-column="${col.id}"]`).forEach(td => {
+                td.style.width = newWidth + 'px';
+                td.style.minWidth = newWidth + 'px';
+            });
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                
+                // Save new width
+                if (!columnConfig[col.id]) {
+                    columnConfig[col.id] = {};
+                }
+                columnConfig[col.id].width = th.offsetWidth;
+                saveColumnConfig();
+            }
+        });
+    });
+}
+
+function openColumnSettings() {
+    const modal = document.getElementById('columnSettingsModal');
+    const controls = document.getElementById('columnVisibilityControls');
+    
+    controls.innerHTML = COLUMN_DEFINITIONS.map(col => {
+        const config = columnConfig[col.id];
+        const visible = config ? config.visible !== false : true;
+        return `
+            <label class="column-toggle">
+                <input type="checkbox" data-column="${col.id}" ${visible ? 'checked' : ''}>
+                <span>${col.label}</span>
+            </label>
+        `;
+    }).join('');
+    
+    // Add event listeners
+    controls.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const colId = e.target.dataset.column;
+            if (!columnConfig[colId]) {
+                columnConfig[colId] = {};
+            }
+            columnConfig[colId].visible = e.target.checked;
+        });
+    });
+    
+    modal.style.display = 'block';
+}
+
+function closeColumnSettings() {
+    document.getElementById('columnSettingsModal').style.display = 'none';
+}
+
+function saveColumnSettings() {
+    saveColumnConfig();
+    applyColumnConfig();
+    renderJobs(); // Re-render to apply visibility changes
+    closeColumnSettings();
+    alert('Column settings saved!');
+}
+
+function resetColumnSettings() {
+    if (confirm('Reset all column settings to default?')) {
+        columnConfig = {};
+        COLUMN_DEFINITIONS.forEach(col => {
+            columnConfig[col.id] = {
+                visible: true,
+                width: col.defaultWidth
+            };
+        });
+        saveColumnConfig();
+        applyColumnConfig();
+        renderJobs();
+        openColumnSettings(); // Refresh the modal
     }
 }
 
@@ -501,9 +915,9 @@ function enterEditMode(jobId) {
     }
     
     // Make editable fields
-    // Column order: fit_score(0), title(1), institution(2), field(3), level(4), deadline(5), location(6), status(7), link(8), actions(9)
-    const editableFields = ['title', 'institution', 'field', 'level', 'deadline', 'location', 'application_status'];
-    const editableIndices = [1, 2, 3, 4, 5, 6, 7]; // Corresponding cell indices
+    // Column order: fit_score(0), title(1), institution(2), field(3), level(4), deadline(5), extracted_deadline(6), location(7), country(8), status(9), materials(10), refs_email(11), portal(12), link(13), actions(14)
+    const editableFields = ['title', 'institution', 'field', 'level', 'deadline', 'extracted_deadline', 'location', 'country', 'application_status', 'application_materials', 'application_portal_url'];
+    const editableIndices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]; // Corresponding cell indices
     const cells = row.querySelectorAll('td');
     
     editableFields.forEach((field, index) => {
@@ -520,6 +934,22 @@ function enterEditMode(jobId) {
                 }
             }
             
+            // For application portal, extract from link or badge
+            if (field === 'application_portal_url') {
+                const link = cell.querySelector('.btn-portal');
+                if (link) {
+                    currentValue = link.href || '';
+                } else {
+                    currentValue = '';
+                }
+            }
+            
+            // For references_separate_email, extract from badge
+            if (field === 'references_separate_email') {
+                const badge = cell.querySelector('.portal-badge');
+                currentValue = badge ? '1' : '0';
+            }
+            
             cell.classList.add('editable');
             
             if (field === 'application_status') {
@@ -532,21 +962,32 @@ function enterEditMode(jobId) {
                         <option value="rejected" ${currentValue === 'rejected' ? 'selected' : ''}>rejected</option>
                     </select>
                 `;
-            } else if (field === 'deadline') {
+            } else if (field === 'deadline' || field === 'extracted_deadline') {
                 // Date input
                 const dateValue = currentValue !== 'N/A' ? currentValue : '';
                 cell.innerHTML = `<input type="date" data-field="${field}" data-job-id="${jobId}" value="${dateValue}">`;
+            } else if (field === 'references_separate_email') {
+                // Boolean checkbox
+                const isChecked = currentValue === '1' || currentValue === 'Yes' || currentValue.toLowerCase() === 'yes';
+                cell.innerHTML = `<input type="checkbox" data-field="${field}" data-job-id="${jobId}" ${isChecked ? 'checked' : ''}>`;
+            } else if (field === 'application_portal_url') {
+                // URL input
+                cell.innerHTML = `<input type="url" data-field="${field}" data-job-id="${jobId}" value="${escapeHtml(currentValue)}" placeholder="https://...">`;
+            } else if (field === 'application_materials') {
+                // Textarea for materials
+                cell.innerHTML = `<textarea data-field="${field}" data-job-id="${jobId}" rows="2" style="width: 100%;">${escapeHtml(currentValue)}</textarea>`;
             } else {
                 // Text input
                 cell.innerHTML = `<input type="text" data-field="${field}" data-job-id="${jobId}" value="${escapeHtml(currentValue)}">`;
             }
             
             // Track changes
-            const input = cell.querySelector('input, select');
-            input.addEventListener('change', function() {
+            const input = cell.querySelector('input, select, textarea');
+            const eventType = input.type === 'checkbox' ? 'change' : 'change';
+            input.addEventListener(eventType, function() {
                 const jobId = this.dataset.jobId;
                 const field = this.dataset.field;
-                const value = this.value;
+                const value = this.type === 'checkbox' ? (this.checked ? 1 : 0) : this.value;
                 
                 if (!editedJobs[jobId]) {
                     editedJobs[jobId] = {};

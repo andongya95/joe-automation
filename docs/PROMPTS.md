@@ -13,6 +13,9 @@ Return a JSON object with the following fields:
 - research_areas: List of research areas mentioned
 - teaching_load: Teaching requirements if mentioned
 - location_preference: Geographic location preferences if mentioned
+- extracted_deadline: Application deadline date extracted from the description text (in YYYY-MM-DD format, or null if not found)
+- requires_separate_application: Boolean indicating if the job requires applying through a separate platform/portal (not just AEA JOE)
+- application_portal_url: URL of the application portal/website if mentioned (e.g., "https://jobs.university.edu/apply"), or null if not found
 ```
 
 **User Prompt:**

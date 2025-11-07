@@ -10,14 +10,20 @@ CREATE TABLE IF NOT EXISTS job_postings (
     field TEXT,
     level TEXT,
     deadline DATE,
+    extracted_deadline DATE,
     location TEXT,
+    country TEXT,
     description TEXT,
+    application_materials TEXT,
+    references_separate_email INTEGER DEFAULT 0,
     requirements TEXT,
     contact_info TEXT,
     posted_date DATE,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fit_score REAL,
-    application_status TEXT DEFAULT 'new'
+    application_status TEXT DEFAULT 'new',
+    application_portal_url TEXT,
+    requires_separate_application INTEGER DEFAULT 0
 );
 """
 

@@ -80,21 +80,21 @@ def api_get_jobs():
                 search_lower in (j.get('field', '') or '').lower()
             )]
         
-        # Sort jobs
+        # Sort jobs (handle None values safely)
         reverse_order = (order.lower() == 'desc')
         if sort_by == 'fit_score':
-            jobs.sort(key=lambda x: x.get('fit_score') or 0, reverse=reverse_order)
+            jobs.sort(key=lambda x: (x.get('fit_score') or 0) if x.get('fit_score') is not None else 0, reverse=reverse_order)
         elif sort_by == 'deadline':
             jobs.sort(key=lambda x: x.get('deadline') or '', reverse=reverse_order)
         elif sort_by == 'institution':
-            jobs.sort(key=lambda x: (x.get('institution') or '').lower(), reverse=reverse_order)
+            jobs.sort(key=lambda x: (x.get('institution') or '').lower() if x.get('institution') else '', reverse=reverse_order)
         elif sort_by == 'title':
-            jobs.sort(key=lambda x: (x.get('title') or '').lower(), reverse=reverse_order)
+            jobs.sort(key=lambda x: (x.get('title') or '').lower() if x.get('title') else '', reverse=reverse_order)
         elif sort_by == 'posted_date':
             jobs.sort(key=lambda x: x.get('posted_date') or '', reverse=reverse_order)
         else:
             # Default sort by fit_score
-            jobs.sort(key=lambda x: x.get('fit_score') or 0, reverse=True)
+            jobs.sort(key=lambda x: (x.get('fit_score') or 0) if x.get('fit_score') is not None else 0, reverse=True)
         
         return jsonify({
             'success': True,
@@ -195,15 +195,15 @@ def api_get_stats():
         
         # Count by status
         for job in all_jobs:
-            status = job.get('application_status', 'new')
+            status = job.get('application_status') or 'new'
             stats['by_status'][status] = stats['by_status'].get(status, 0) + 1
             
             # Count by field
-            field = job.get('field', 'Unknown')
+            field = job.get('field') or 'Unknown'
             stats['by_field'][field] = stats['by_field'].get(field, 0) + 1
             
             # Count by level
-            level = job.get('level', 'Unknown')
+            level = job.get('level') or 'Unknown'
             stats['by_level'][level] = stats['by_level'].get(level, 0) + 1
         
         # Calculate average fit score
@@ -228,7 +228,7 @@ def api_get_fields():
     """Get list of unique fields."""
     try:
         all_jobs = get_all_jobs()
-        fields = sorted(set(j.get('field', '') for j in all_jobs if j.get('field')))
+        fields = sorted(set(j.get('field') or '' for j in all_jobs if j.get('field')), key=lambda x: x or '')
         return jsonify({
             'success': True,
             'fields': fields
@@ -241,12 +241,30 @@ def api_get_fields():
         }), 500
 
 
+@app.route('/api/countries', methods=['GET'])
+def api_get_countries():
+    """Get list of unique countries."""
+    try:
+        all_jobs = get_all_jobs()
+        countries = sorted(set(j.get('country') or '' for j in all_jobs if j.get('country')), key=lambda x: x or '')
+        return jsonify({
+            'success': True,
+            'countries': countries
+        })
+    except Exception as e:
+        logger.error(f"Error in api_get_countries: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/levels', methods=['GET'])
 def api_get_levels():
     """Get list of unique levels."""
     try:
         all_jobs = get_all_jobs()
-        levels = sorted(set(j.get('level', '') for j in all_jobs if j.get('level')))
+        levels = sorted(set(j.get('level') or '' for j in all_jobs if j.get('level')), key=lambda x: x or '')
         return jsonify({
             'success': True,
             'levels': levels
@@ -319,9 +337,31 @@ def api_scrape_jobs():
             }
             
             if job_id in existing_ids:
-                # Update existing job
-                if update_job(job_id, db_job):
-                    updated_jobs.append(job_id)
+                # Update existing job - preserve user-edited fields
+                existing_job = next((j for j in existing_jobs if j['job_id'] == job_id), None)
+                if existing_job:
+                    # Preserve user-edited fields that shouldn't be overwritten by scraped data
+                    # Only update fields that come from the source (scraped data)
+                    # Preserve: application_status, fit_score (if manually set)
+                    preserved_fields = {}
+                    if existing_job.get('application_status') and existing_job.get('application_status') != 'new':
+                        # Preserve user-set status (applied, rejected, expired, etc.)
+                        preserved_fields['application_status'] = existing_job.get('application_status')
+                    if existing_job.get('fit_score') is not None and db_job.get('fit_score') is None:
+                        # Preserve fit_score if scraped data doesn't have one
+                        preserved_fields['fit_score'] = existing_job.get('fit_score')
+                    
+                    # Remove preserved fields from db_job so they don't get overwritten
+                    for field in preserved_fields:
+                        db_job.pop(field, None)
+                    
+                    # Update with scraped data (without preserved fields)
+                    if update_job(job_id, db_job):
+                        updated_jobs.append(job_id)
+                else:
+                    # Fallback if existing job not found
+                    if update_job(job_id, db_job):
+                        updated_jobs.append(job_id)
             else:
                 # Add new job
                 if add_job(db_job):
@@ -384,7 +424,9 @@ def api_process_jobs():
                     if details:
                         # Filter to only include valid database fields
                         valid_fields = {
-                            'position_type', 'field', 'level', 'requirements'
+                            'position_type', 'field', 'level', 'requirements',
+                            'extracted_deadline', 'application_portal_url', 'requires_separate_application',
+                            'country', 'application_materials', 'references_separate_email'
                         }
                         filtered_details = {k: v for k, v in details.items() if k in valid_fields}
                         # Convert research_areas list to string if present and add to requirements
@@ -394,6 +436,14 @@ def api_process_jobs():
                                 filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
                             else:
                                 filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
+                        # Convert boolean to integer for database
+                        if 'requires_separate_application' in filtered_details:
+                            filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
+                        if 'references_separate_email' in filtered_details:
+                            filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
+                        # Convert application_materials list to string if present
+                        if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
+                            filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
                         update_data.update(filtered_details)
                 
                 # Parse deadline

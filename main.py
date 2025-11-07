@@ -100,6 +100,34 @@ def process_jobs(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return processed_jobs
 
 
+def _needs_llm_processing(job: Dict[str, Any]) -> bool:
+    """Determine whether a job still needs LLM processing for enriched fields."""
+    # Helper to check if a string field has meaningful content
+    def has_text(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.strip() != ''
+        return True
+
+    enriched_values = [
+        job.get('extracted_deadline'),
+        job.get('application_portal_url'),
+        job.get('country'),
+        job.get('application_materials'),
+    ]
+    boolean_enriched = [
+        job.get('requires_separate_application'),
+        job.get('references_separate_email'),
+    ]
+
+    has_enriched_text = any(has_text(val) for val in enriched_values)
+    has_enriched_bool = any(bool(val) for val in boolean_enriched)
+
+    # If none of the enriched fields have values, the job still needs processing
+    return not (has_enriched_text or has_enriched_bool)
+
+
 def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool = True) -> int:
     """Process jobs from database with LLM one by one, saving after each API call."""
     logger.info("Starting incremental LLM processing...")
@@ -109,10 +137,9 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
         all_jobs = get_all_jobs()
         
         if skip_processed:
-            # Filter jobs that don't have position_type or field (indicating not processed)
             jobs_to_process = [
-                j for j in all_jobs 
-                if not j.get('position_type') and not j.get('field')
+                j for j in all_jobs
+                if _needs_llm_processing(j)
             ]
         else:
             jobs_to_process = all_jobs
@@ -138,7 +165,9 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
                     if details:
                         # Filter to only include valid database fields
                         valid_fields = {
-                            'position_type', 'field', 'level', 'requirements'
+                            'position_type', 'field', 'level', 'requirements',
+                            'extracted_deadline', 'application_portal_url', 'requires_separate_application',
+                            'country', 'application_materials', 'references_separate_email'
                         }
                         filtered_details = {k: v for k, v in details.items() if k in valid_fields}
                         # Convert research_areas list to string if present and add to requirements
@@ -148,6 +177,14 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
                                 filtered_details['requirements'] += f"\nResearch Areas: {research_areas_str}"
                             else:
                                 filtered_details['requirements'] = f"Research Areas: {research_areas_str}"
+                        # Convert boolean to integer for database
+                        if 'requires_separate_application' in filtered_details:
+                            filtered_details['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
+                        if 'references_separate_email' in filtered_details:
+                            filtered_details['references_separate_email'] = bool(filtered_details['references_separate_email'])
+                        # Convert application_materials list to string if present
+                        if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
+                            filtered_details['application_materials'] = ', '.join(filtered_details['application_materials'])
                         update_data.update(filtered_details)
                 
                 # Parse deadline
@@ -173,8 +210,10 @@ def process_jobs_incrementally(limit: Optional[int] = None, skip_processed: bool
                 # Filter update_data to only include valid database columns
                 valid_db_fields = {
                     'title', 'institution', 'position_type', 'field', 'level',
-                    'deadline', 'location', 'description', 'requirements',
-                    'contact_info', 'posted_date', 'fit_score', 'application_status'
+                    'deadline', 'extracted_deadline', 'location', 'country', 'description', 'requirements',
+                    'contact_info', 'posted_date', 'fit_score', 'application_status',
+                    'application_portal_url', 'requires_separate_application',
+                    'application_materials', 'references_separate_email'
                 }
                 filtered_update = {k: v for k, v in update_data.items() if k in valid_db_fields}
                 
@@ -259,19 +298,47 @@ def update_database(jobs: List[Dict[str, Any]]) -> tuple[int, int]:
                 'field': job.get('field'),
                 'level': job.get('level'),
                 'deadline': job.get('deadline'),
+                'extracted_deadline': job.get('extracted_deadline'),
                 'location': job.get('location'),
+                'country': job.get('country'),
                 'description': job.get('description'),
                 'requirements': job.get('requirements'),
                 'contact_info': job.get('contact_info'),
                 'posted_date': job.get('posted_date'),
                 'fit_score': job.get('fit_score'),
                 'application_status': job.get('application_status', 'new'),
+                'application_portal_url': job.get('application_portal_url'),
+                'requires_separate_application': job.get('requires_separate_application', False),
+                'application_materials': job.get('application_materials'),
+                'references_separate_email': job.get('references_separate_email', False),
             }
             
             if job_id in existing_ids:
-                # Update existing job
-                if update_job(job_id, db_job):
-                    updated_count += 1
+                # Update existing job - preserve user-edited fields
+                existing_job = next((j for j in existing_jobs if j['job_id'] == job_id), None)
+                if existing_job:
+                    # Preserve user-edited fields that shouldn't be overwritten by scraped data
+                    # Only update fields that come from the source (scraped data)
+                    # Preserve: application_status, fit_score (if manually set)
+                    preserved_fields = {}
+                    if existing_job.get('application_status') and existing_job.get('application_status') != 'new':
+                        # Preserve user-set status (applied, rejected, expired, etc.)
+                        preserved_fields['application_status'] = existing_job.get('application_status')
+                    if existing_job.get('fit_score') is not None and db_job.get('fit_score') is None:
+                        # Preserve fit_score if scraped data doesn't have one
+                        preserved_fields['fit_score'] = existing_job.get('fit_score')
+                    
+                    # Remove preserved fields from db_job so they don't get overwritten
+                    for field in preserved_fields:
+                        db_job.pop(field, None)
+                    
+                    # Update with scraped data (without preserved fields)
+                    if update_job(job_id, db_job):
+                        updated_count += 1
+                else:
+                    # Fallback if existing job not found
+                    if update_job(job_id, db_job):
+                        updated_count += 1
             else:
                 # Add new job
                 if add_job(db_job):
@@ -311,7 +378,9 @@ def export_to_csv(output_path: str = "data/exports/job_matches.csv") -> bool:
         # Prepare CSV data with key fields only (for visualization)
         fieldnames = [
             'job_id', 'title', 'institution', 'position_type', 'field', 'level',
-            'deadline', 'location', 'fit_score', 'application_status', 'posted_date'
+            'deadline', 'extracted_deadline', 'location', 'country', 'fit_score', 'application_status',
+            'posted_date', 'application_portal_url', 'requires_separate_application',
+            'application_materials', 'references_separate_email'
         ]
         
         with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:

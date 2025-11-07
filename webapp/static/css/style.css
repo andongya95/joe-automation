@@ -116,6 +116,152 @@ header h1 {
     gap: 10px;
 }
 
+.bulk-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+.bulk-actions #selectedCount {
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.bulk-actions select {
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.btn-select, .btn-bulk-update {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-select {
+    background-color: #6c757d;
+    color: white;
+}
+
+.btn-select:hover {
+    background-color: #5a6268;
+}
+
+.btn-bulk-update {
+    background-color: #007bff;
+    color: white;
+}
+
+.btn-bulk-update:hover {
+    background-color: #0056b3;
+}
+
+.job-checkbox {
+    cursor: pointer;
+}
+
+#selectAllCheckbox {
+    cursor: pointer;
+}
+
+/* Column resizing */
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 5px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 10;
+}
+
+.resize-handle:hover {
+    background: rgba(102, 126, 234, 0.3);
+}
+
+th[data-column] {
+    position: relative;
+}
+
+/* Column settings */
+.btn-column-settings {
+    padding: 8px 15px;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-column-settings:hover {
+    background-color: #5a6268;
+}
+
+.column-settings-content {
+    padding: 20px 0;
+}
+
+.column-visibility-controls {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.column-toggle {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.column-toggle:hover {
+    background-color: #f0f0f0;
+}
+
+.column-toggle input[type="checkbox"] {
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.btn-reset {
+    padding: 8px 15px;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+}
+
+.btn-reset:hover {
+    background-color: #c82333;
+}
+
+/* Application materials formatting */
+table td ul {
+    margin: 0;
+    padding-left: 20px;
+    list-style-type: disc;
+}
+
+table td ul li {
+    margin: 2px 0;
+    line-height: 1.4;
+}
+
 #searchInput {
     flex: 1;
     padding: 10px 15px;
@@ -280,14 +426,50 @@ td.editable.edited {
 }
 
 /* Link styling */
-.joe-link {
-    color: #667eea;
+.btn-view-joe {
+    display: inline-block;
+    padding: 6px 12px;
+    background-color: #667eea;
+    color: white;
     text-decoration: none;
+    border-radius: 4px;
+    font-size: 0.9em;
     font-weight: 500;
+    transition: background-color 0.2s;
 }
 
-.joe-link:hover {
-    text-decoration: underline;
+.btn-view-joe:hover {
+    background-color: #5568d3;
+    color: white;
+    text-decoration: none;
+}
+
+.btn-portal {
+    display: inline-block;
+    padding: 6px 12px;
+    background-color: #10b981;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.btn-portal:hover {
+    background-color: #059669;
+    color: white;
+    text-decoration: none;
+}
+
+.portal-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    background-color: #fbbf24;
+    color: #92400e;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-weight: 500;
 }
 
 /* Table */
@@ -316,6 +498,13 @@ th {
     font-size: 0.9em;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+th[data-column] {
+    min-width: 80px;
 }
 
 th.sortable {
@@ -360,6 +549,13 @@ tbody tr.expanded {
 td {
     padding: 12px;
     font-size: 0.95em;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+td[data-column] {
+    min-width: 80px;
 }
 
 td.loading {

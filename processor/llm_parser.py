@@ -152,13 +152,24 @@ Return a JSON object with the following fields:
 - requirements: Key requirements and qualifications (as a string)
 - research_areas: List of research areas mentioned
 - teaching_load: Teaching requirements if mentioned
-- location_preference: Geographic location preferences if mentioned"""
+- location_preference: Geographic location preferences if mentioned
+- extracted_deadline: Application deadline date extracted from the description text (in YYYY-MM-DD format, or null if not found)
+- requires_separate_application: Boolean indicating if the job requires applying through a separate platform/portal (not just AEA JOE)
+- application_portal_url: URL of the application portal/website if mentioned (e.g., "https://jobs.university.edu/apply"), or null if not found
+- country: Country name extracted from location field (e.g., "United States", "Canada", "United Kingdom")
+- application_materials: List of required application materials mentioned in the description (e.g., ["CV", "Cover Letter", "Research Statement", "Teaching Statement", "Writing Sample", "Transcripts"])
+- references_separate_email: Boolean indicating if reference letters need to be sent to a separate email address (different from the main application)"""
 
     prompt = f"""Extract structured information from this job posting:
 
 {job_description}
 
-Return only valid JSON with the fields specified."""
+Return only valid JSON with the fields specified. 
+- For extracted_deadline, parse any date mentioned in the text.
+- For application_portal_url, look for URLs to application systems, HR portals, or university job sites.
+- For country, extract the country name from the location information.
+- For application_materials, list all required materials mentioned (CV, cover letter, statements, transcripts, etc.).
+- For references_separate_email, check if references should be sent to a different email address than the main application."""
     
     try:
         response = _call_llm(prompt, system_prompt)

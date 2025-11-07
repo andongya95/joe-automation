@@ -38,11 +38,12 @@
                 <div class="filter-group">
                     <label for="filterStatus">Status:</label>
                     <select id="filterStatus">
-                        <option value="">All</option>
+                        <option value="">All (excluding unrelated)</option>
                         <option value="new">New</option>
                         <option value="applied">Applied</option>
                         <option value="expired">Expired</option>
                         <option value="rejected">Rejected</option>
+                        <option value="unrelated">Unrelated</option>
                     </select>
                 </div>
                 <div class="filter-group">
@@ -58,6 +59,12 @@
                     </select>
                 </div>
                 <div class="filter-group">
+                    <label for="filterCountry">Country:</label>
+                    <select id="filterCountry">
+                        <option value="">All Countries</option>
+                    </select>
+                </div>
+                <div class="filter-group">
                     <label for="filterMinScore">Min Fit Score:</label>
                     <input type="number" id="filterMinScore" min="0" max="100" step="1" placeholder="0">
                 </div>
@@ -67,6 +74,20 @@
                 <button id="clearFilters">Clear Filters</button>
                 <button id="scrapeButton" class="btn-scrape">Scrape New Jobs</button>
                 <button id="processButton" class="btn-process">Process with LLM</button>
+                <button id="columnSettingsBtn" class="btn-column-settings" title="Column Settings">⚙️ Columns</button>
+            </div>
+            <div class="bulk-actions" id="bulkActions" style="display: none;">
+                <span id="selectedCount">0 selected</span>
+                <button id="selectAllBtn" class="btn-select">Select All</button>
+                <button id="deselectAllBtn" class="btn-select">Deselect All</button>
+                <select id="bulkStatusSelect">
+                    <option value="unrelated">Mark as Unrelated</option>
+                    <option value="new">Mark as New</option>
+                    <option value="applied">Mark as Applied</option>
+                    <option value="rejected">Mark as Rejected</option>
+                    <option value="expired">Mark as Expired</option>
+                </select>
+                <button id="bulkUpdateBtn" class="btn-bulk-update">Update Selected</button>
             </div>
             <div class="edit-controls" id="editControls" style="display: none;">
                 <button id="saveButton" class="btn-save">Save Changes</button>
@@ -79,24 +100,48 @@
             <table id="jobsTable">
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="selectAllCheckbox" title="Select All"></th>
                         <th class="sortable" data-sort="fit_score">Fit Score</th>
                         <th class="sortable" data-sort="title">Title</th>
                         <th class="sortable" data-sort="institution">Institution</th>
                         <th>Field</th>
                         <th>Level</th>
                         <th class="sortable" data-sort="deadline">Deadline</th>
+                        <th class="sortable" data-sort="extracted_deadline">Extracted Deadline</th>
                         <th>Location</th>
+                        <th>Country</th>
                         <th>Status</th>
+                        <th>Application Materials</th>
+                        <th>Refs Separate Email</th>
+                        <th>Application Portal</th>
                         <th>Link</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="jobsTableBody">
                     <tr>
-                        <td colspan="10" class="loading">Loading jobs...</td>
+                        <td colspan="15" class="loading">Loading jobs...</td>
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Column Settings Modal -->
+        <div id="columnSettingsModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <span class="close" id="closeColumnSettings">&times;</span>
+                <h2>Column Settings</h2>
+                <div class="column-settings-content">
+                    <h3>Show/Hide Columns</h3>
+                    <div id="columnVisibilityControls" class="column-visibility-controls">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <button id="resetColumnSettings" class="btn-reset">Reset to Default</button>
+                        <button id="saveColumnSettings" class="btn-save">Save Settings</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="jobDetailsModal" class="modal">

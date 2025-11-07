@@ -62,9 +62,11 @@ def add_job(job_data: Dict[str, Any]) -> bool:
             cursor.execute("""
                 INSERT OR IGNORE INTO job_postings (
                     job_id, title, institution, position_type, field, level,
-                    deadline, location, description, requirements, contact_info,
-                    posted_date, last_updated, fit_score, application_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    deadline, extracted_deadline, location, country, description, requirements, contact_info,
+                    posted_date, last_updated, fit_score, application_status,
+                    application_portal_url, requires_separate_application,
+                    application_materials, references_separate_email
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job_data.get('job_id'),
                 job_data.get('title'),
@@ -73,14 +75,20 @@ def add_job(job_data: Dict[str, Any]) -> bool:
                 job_data.get('field'),
                 job_data.get('level'),
                 job_data.get('deadline'),
+                job_data.get('extracted_deadline'),
                 job_data.get('location'),
+                job_data.get('country'),
                 job_data.get('description'),
                 job_data.get('requirements'),
                 job_data.get('contact_info'),
                 job_data.get('posted_date'),
                 datetime.now().isoformat(),
                 job_data.get('fit_score'),
-                job_data.get('application_status', 'new')
+                job_data.get('application_status', 'new'),
+                job_data.get('application_portal_url'),
+                1 if job_data.get('requires_separate_application') else 0,
+                job_data.get('application_materials'),
+                1 if job_data.get('references_separate_email') else 0
             ))
             return cursor.rowcount > 0
     except Exception as e:
