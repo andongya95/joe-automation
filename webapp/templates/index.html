@@ -74,6 +74,7 @@
                 <button id="clearFilters">Clear Filters</button>
                 <button id="scrapeButton" class="btn-scrape">Scrape New Jobs</button>
                 <button id="processButton" class="btn-process">Process with LLM</button>
+                <button id="matchButton" class="btn-process">Match Fit Scores</button>
                 <button id="columnSettingsBtn" class="btn-column-settings" title="Column Settings">⚙️ Columns</button>
             </div>
             <div class="bulk-actions" id="bulkActions" style="display: none;">
@@ -100,22 +101,22 @@
             <table id="jobsTable">
                 <thead>
                     <tr>
-                        <th><input type="checkbox" id="selectAllCheckbox" title="Select All"></th>
-                        <th class="sortable" data-sort="fit_score">Fit Score</th>
-                        <th class="sortable" data-sort="title">Title</th>
-                        <th class="sortable" data-sort="institution">Institution</th>
-                        <th>Field</th>
-                        <th>Level</th>
-                        <th class="sortable" data-sort="deadline">Deadline</th>
-                        <th class="sortable" data-sort="extracted_deadline">Extracted Deadline</th>
-                        <th>Location</th>
-                        <th>Country</th>
-                        <th>Status</th>
-                        <th>Application Materials</th>
-                        <th>Refs Separate Email</th>
-                        <th>Application Portal</th>
-                        <th>Link</th>
-                        <th>Actions</th>
+                        <th data-column="checkbox"><input type="checkbox" id="selectAllCheckbox" title="Select All"></th>
+                        <th class="sortable" data-column="fit_score" data-sort="fit_score">Fit Score</th>
+                        <th class="sortable" data-column="title" data-sort="title">Title</th>
+                        <th class="sortable" data-column="institution" data-sort="institution">Institution</th>
+                        <th data-column="field">Field</th>
+                        <th data-column="level">Level</th>
+                        <th class="sortable" data-column="deadline" data-sort="deadline">Deadline</th>
+                        <th class="sortable" data-column="extracted_deadline" data-sort="extracted_deadline">Extracted Deadline</th>
+                        <th data-column="location">Location</th>
+                        <th data-column="country">Country</th>
+                        <th data-column="status">Status</th>
+                        <th data-column="application_materials">Application Materials</th>
+                        <th data-column="references_separate_email">Refs Separate Email</th>
+                        <th data-column="application_portal">Application Portal</th>
+                        <th data-column="link">Link</th>
+                        <th data-column="actions">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="jobsTableBody">

@@ -60,10 +60,8 @@ Thumbs.db
 *.csv
 data/exports/*.csv
 data/backups/*.db
-portfolio/*.pdf
-portfolio/*.docx
-portfolio/*.doc
-portfolio/*.txt
+# Portfolio materials (user-specific)
+portfolio/
 
 # Temporary files
 *.tmp

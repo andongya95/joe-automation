@@ -14,7 +14,7 @@ from database import (
 from scraper import download_job_data, parse_job_listings
 from processor import extract_job_details, parse_deadlines, classify_position
 from config.settings import PORTFOLIO_PATH
-from matcher import load_portfolio
+from matcher import load_portfolio, calculate_fit_score
 
 # Configure logging with datetime prefix
 logging.basicConfig(
@@ -217,6 +217,54 @@ def api_get_stats():
         })
     except Exception as e:
         logger.error(f"Error in api_get_stats: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/match', methods=['POST'])
+def api_match_jobs():
+    """Calculate fit scores using portfolio materials and update database."""
+    try:
+        logger.info("Match fit scores triggered from web interface")
+
+        portfolio = load_portfolio()
+        if not portfolio.get('combined_text'):
+            return jsonify({
+                'success': False,
+                'error': 'Portfolio text unavailable. Upload CV/research statement first.'
+            }), 400
+
+        jobs = get_all_jobs()
+        if not jobs:
+            return jsonify({
+                'success': False,
+                'error': 'No jobs available to match.'
+            }), 400
+
+        updated_count = 0
+        error_count = 0
+
+        for job in jobs:
+            try:
+                fit_score = calculate_fit_score(job, portfolio)
+                if fit_score is not None:
+                    update_job(job['job_id'], {'fit_score': fit_score})
+                    updated_count += 1
+            except Exception as match_error:
+                logger.error(f"Error calculating fit score for {job.get('job_id')}: {match_error}")
+                error_count += 1
+
+        return jsonify({
+            'success': True,
+            'message': f'Fit scores updated: {updated_count} jobs, {error_count} errors',
+            'updated_count': updated_count,
+            'error_count': error_count
+        })
+
+    except Exception as e:
+        logger.error(f"Error in api_match_jobs: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)

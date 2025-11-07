@@ -49,6 +49,7 @@ function setupEventListeners() {
     document.getElementById('clearFilters').addEventListener('click', clearFilters);
     document.getElementById('scrapeButton').addEventListener('click', triggerScrape);
     document.getElementById('processButton').addEventListener('click', triggerProcess);
+    document.getElementById('matchButton').addEventListener('click', triggerMatch);
     document.getElementById('saveButton').addEventListener('click', saveEdits);
     document.getElementById('cancelEditButton').addEventListener('click', cancelEdit);
     
@@ -893,6 +894,40 @@ async function triggerProcess() {
         // Re-enable button
         button.disabled = false;
         button.classList.remove('processing');
+        button.textContent = originalText;
+    }
+}
+
+// Trigger fit score matching
+async function triggerMatch() {
+    const button = document.getElementById('matchButton');
+    const originalText = button.textContent;
+
+    button.disabled = true;
+    button.textContent = 'Matching...';
+
+    try {
+        const response = await fetch('/api/match', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to match fit scores');
+        }
+
+        alert(data.message || 'Fit scores updated successfully');
+        await loadStats();
+        await loadJobs();
+    } catch (error) {
+        console.error('Error matching fit scores:', error);
+        showError('Error matching fit scores: ' + error.message);
+    } finally {
+        button.disabled = false;
         button.textContent = originalText;
     }
 }

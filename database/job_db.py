@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
+from fasteners import InterProcessLock
 
 from config.settings import DATABASE_PATH
 from database.models import JOB_POSTINGS_SCHEMA, CREATE_INDEXES
@@ -19,17 +20,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+DB_LOCK_PATH = Path(DATABASE_PATH).with_suffix('.lock')
+
+
 @contextmanager
 def get_db_connection():
-    """Context manager for database connections."""
+    """Context manager for database connections with WAL and locking."""
     conn = None
+    lock = InterProcessLock(str(DB_LOCK_PATH))
+    lock.acquire()
     try:
-        # Ensure data directory exists
         db_path = Path(DATABASE_PATH)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        conn = sqlite3.connect(str(db_path))
+
+        conn = sqlite3.connect(str(db_path), timeout=30.0, isolation_level=None)
         conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA journal_mode=WAL;')
+        conn.execute('PRAGMA busy_timeout = 30000;')
+        conn.execute('BEGIN IMMEDIATE;')
+
         yield conn
         conn.commit()
     except Exception as e:
@@ -40,6 +49,7 @@ def get_db_connection():
     finally:
         if conn:
             conn.close()
+        lock.release()
 
 
 def init_database():
