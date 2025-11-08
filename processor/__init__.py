@@ -8,6 +8,7 @@ from .llm_parser import (
     extract_job_details_batch,
     parse_deadlines_batch,
     classify_position_batch,
+    normalize_level_labels,
 )
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "parse_deadlines_batch",
     "classify_position",
     "classify_position_batch",
+    "normalize_level_labels",
 ]
 

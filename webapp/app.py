@@ -21,6 +21,7 @@ from processor import (
     extract_job_details_batch,
     parse_deadlines_batch,
     classify_position_batch,
+    normalize_level_labels,
 )
 from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
 from config.prompt_loader import get_prompts as load_prompts, save_prompts
@@ -127,6 +128,7 @@ def api_get_jobs():
         status = request.args.get('status', None)
         field = request.args.get('field', None)
         level = request.args.get('level', None)
+        position_track = request.args.get('position_track', None)
         min_fit_score = request.args.get('min_fit_score', None)
         search = request.args.get('search', None)
         sort_by = request.args.get('sort_by', 'fit_score')
@@ -141,6 +143,10 @@ def api_get_jobs():
         
         if level:
             jobs = [j for j in jobs if j.get('level', '').lower() == level.lower()]
+
+        if position_track:
+            track_lower = position_track.lower()
+            jobs = [j for j in jobs if (j.get('position_track') or '').lower() == track_lower]
         
         # Apply text search
         if search:
@@ -630,6 +636,32 @@ def api_get_levels():
         }), 500
 
 
+@app.route('/api/position-tracks', methods=['GET'])
+def api_get_position_tracks():
+    """Get list of unique position tracks."""
+    try:
+        all_jobs = get_all_jobs()
+        track_map = {}
+        for job in all_jobs:
+            raw_track = (job.get('position_track') or '').strip()
+            if not raw_track:
+                continue
+            lower = raw_track.lower()
+            if lower not in track_map:
+                track_map[lower] = lower
+        tracks = [track_map[key] for key in sorted(track_map.keys())]
+        return jsonify({
+            'success': True,
+            'tracks': tracks
+        })
+    except Exception as e:
+        logger.error(f"Error in api_get_position_tracks: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/scrape', methods=['POST'])
 def api_scrape_jobs():
     """Trigger job scraping and update database."""
@@ -823,7 +855,7 @@ def api_process_jobs():
             logger.info(f"Processing batch {batch_num}/{total_batches} ({len(job_batch)} jobs)...")
             
             # Process this batch
-            batch_processed, batch_errors = _process_job_batch_web(job_batch)
+            batch_processed, batch_errors = _process_job_batch_web(job_batch, force=force)
             total_processed += batch_processed
             total_errors += batch_errors
             
@@ -865,7 +897,7 @@ def api_process_jobs():
         }), 500
 
 
-def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
+def _process_job_batch_web(job_batch: List[Dict[str, Any]], force: bool = False) -> Tuple[int, int]:
     """Process a single batch of jobs with LLM and save immediately (web version)."""
     # Helper to check if a value is meaningful (not None, not empty string)
     def has_meaningful_value(value: Any) -> bool:
@@ -922,34 +954,44 @@ def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
                 }
                 filtered_details = {k: v for k, v in details.items() if k in valid_fields and has_meaningful_value(v)}
                 
+                if 'level' in filtered_details:
+                    normalized_levels = normalize_level_labels(
+                        filtered_details['level'],
+                        job_title=job.get('title', ''),
+                        job_description=description,
+                    )
+                    filtered_details['level'] = ' / '.join(normalized_levels) if normalized_levels else ''
+
                 for key, new_value in filtered_details.items():
                     existing_value = existing_job.get(key)
-                    if not has_meaningful_value(existing_value) or (key in ('requirements', 'application_materials') and has_meaningful_value(new_value)):
+                    if force:
+                        if key == 'application_materials' and isinstance(new_value, list):
+                            update_data[key] = ', '.join(new_value)
+                        else:
+                            update_data[key] = new_value
+                    elif not has_meaningful_value(existing_value) or (key in ('requirements', 'application_materials') and has_meaningful_value(new_value)):
                         if key == 'requirements' and existing_value and has_meaningful_value(new_value):
                             if new_value not in existing_value:
                                 update_data[key] = f"{existing_value}\n{new_value}"
                         else:
                             update_data[key] = new_value
                 
-                # Handle level field - ensure comma-separated if multiple levels
+                # Handle level field - ensure forward-slash separation if provided as iterable
                 if 'level' in update_data and isinstance(update_data['level'], (list, tuple)):
-                    update_data['level'] = ', '.join(str(l) for l in update_data['level'])
-                elif 'level' in update_data and isinstance(update_data['level'], str) and ',' in update_data['level']:
-                    # Already comma-separated, keep as is
-                    pass
+                    update_data['level'] = ' / '.join(str(l) for l in update_data['level'])
                 
                 if 'research_areas' in details and details['research_areas']:
                     research_areas_str = ', '.join(details['research_areas']) if isinstance(details['research_areas'], list) else str(details['research_areas'])
                     if 'requirements' in update_data:
                         update_data['requirements'] += f"\nResearch Areas: {research_areas_str}"
-                    elif not existing_job.get('requirements'):
+                    elif force or not existing_job.get('requirements'):
                         update_data['requirements'] = f"Research Areas: {research_areas_str}"
                 
                 if 'requires_separate_application' in filtered_details:
                     update_data['requires_separate_application'] = bool(filtered_details['requires_separate_application'])
                 if 'references_separate_email' in filtered_details:
                     update_data['references_separate_email'] = bool(filtered_details['references_separate_email'])
-                if 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
+                if not force and 'application_materials' in filtered_details and isinstance(filtered_details['application_materials'], list):
                     update_data['application_materials'] = ', '.join(filtered_details['application_materials'])
 
             deadline_text = job.get('deadline', '')
@@ -966,13 +1008,13 @@ def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
                 classification = classify_position(job.get('title', ''), description[:500])
             if classification:
                 if 'field_focus' in classification and has_meaningful_value(classification.get('field_focus')):
-                    if not has_meaningful_value(existing_job.get('field')) and not update_data.get('field'):
+                    if force or (not has_meaningful_value(existing_job.get('field')) and not update_data.get('field')):
                         update_data['field'] = classification.get('field_focus', '')
                 if 'level' in classification and has_meaningful_value(classification.get('level')):
-                    if not has_meaningful_value(existing_job.get('level')) and 'level' not in update_data:
+                    if force or (not has_meaningful_value(existing_job.get('level')) and 'level' not in update_data):
                         update_data['level'] = classification.get('level', '')
                 if 'type' in classification and has_meaningful_value(classification.get('type')):
-                    if not has_meaningful_value(existing_job.get('position_type')) and 'position_type' not in update_data:
+                    if force or (not has_meaningful_value(existing_job.get('position_type')) and 'position_type' not in update_data):
                         update_data['position_type'] = classification.get('type', '')
 
             track_result = position_track_results.get(job_id) if job_id else None
@@ -984,13 +1026,10 @@ def _process_job_batch_web(job_batch: List[Dict[str, Any]]) -> Tuple[int, int]:
             elif not job.get('position_track'):
                 update_data.setdefault('position_track', 'other academia')
             
-            # Handle level field from classification - ensure comma-separated if multiple levels
+            # Handle level field from classification - ensure forward-slash separation if multiple levels
             if 'level' in update_data:
                 if isinstance(update_data['level'], (list, tuple)):
-                    update_data['level'] = ', '.join(str(l) for l in update_data['level'])
-                elif isinstance(update_data['level'], str) and ',' in update_data['level']:
-                    # Already comma-separated, keep as is
-                    pass
+                    update_data['level'] = ' / '.join(str(l) for l in update_data['level'])
 
             valid_db_fields = {
                 'title', 'institution', 'position_type', 'field', 'level',

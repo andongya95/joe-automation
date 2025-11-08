@@ -245,6 +245,7 @@ function setupEventListeners() {
     // Filters
     document.getElementById('filterStatus').addEventListener('change', applyFilters);
     document.getElementById('filterField').addEventListener('change', applyFilters);
+    document.getElementById('filterPositionTrack').addEventListener('change', applyFilters);
     document.getElementById('filterLevel').addEventListener('change', applyFilters);
     document.getElementById('filterCountry').addEventListener('change', applyFilters);
     document.getElementById('filterMinScore').addEventListener('input', applyFilters);
@@ -339,14 +340,16 @@ async function loadStats() {
 // Load filters (fields, levels, countries)
 async function loadFilters() {
     try {
-        const [fieldsRes, levelsRes, countriesRes] = await Promise.all([
+        const [fieldsRes, levelsRes, tracksRes, countriesRes] = await Promise.all([
             fetch('/api/fields'),
             fetch('/api/levels'),
+            fetch('/api/position-tracks'),
             fetch('/api/countries')
         ]);
         
         const fieldsData = await fieldsRes.json();
         const levelsData = await levelsRes.json();
+        const tracksData = await tracksRes.json();
         const countriesData = await countriesRes.json();
         
         if (fieldsData.success) {
@@ -375,6 +378,21 @@ async function loadFilters() {
                     option.value = level;
                     option.textContent = level;
                     filterLevel.appendChild(option);
+                });
+            }
+        }
+
+        if (tracksData.success) {
+            const filterTrack = document.getElementById('filterPositionTrack');
+            if (filterTrack) {
+                while (filterTrack.options.length > 1) {
+                    filterTrack.remove(1);
+                }
+                tracksData.tracks.forEach(track => {
+                    const option = document.createElement('option');
+                    option.value = track;
+                    option.textContent = track;
+                    filterTrack.appendChild(option);
                 });
             }
         }
@@ -425,6 +443,7 @@ async function loadJobs() {
 function applyFilters() {
     const status = document.getElementById('filterStatus').value;
     const field = document.getElementById('filterField').value;
+    const positionTrack = document.getElementById('filterPositionTrack').value;
     const level = document.getElementById('filterLevel').value;
     const country = document.getElementById('filterCountry').value;
     const minScore = document.getElementById('filterMinScore').value;
@@ -435,6 +454,7 @@ function applyFilters() {
         if (!status && job.application_status === 'unrelated') return false;
         if (status && job.application_status !== status) return false;
         if (field && job.field !== field) return false;
+        if (positionTrack && (job.position_track || '').toLowerCase() !== positionTrack.toLowerCase()) return false;
         if (level && job.level !== level) return false;
         if (country && job.country !== country) return false;
         if (minScore && (job.fit_score || 0) < parseFloat(minScore)) return false;
@@ -740,6 +760,7 @@ function closeModal() {
 function clearFilters() {
     document.getElementById('filterStatus').value = '';
     document.getElementById('filterField').value = '';
+    document.getElementById('filterPositionTrack').value = '';
     document.getElementById('filterLevel').value = '';
     document.getElementById('filterCountry').value = '';
     document.getElementById('filterMinScore').value = '';

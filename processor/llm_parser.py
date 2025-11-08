@@ -17,6 +17,7 @@ from config.settings import (
     LLM_MAX_CONCURRENCY,
     LLM_MIN_CALL_INTERVAL,
 )
+from processor.level_normalizer import normalize_level_labels as _normalize_levels
 
 # Configure logging with datetime prefix
 logging.basicConfig(
@@ -188,6 +189,11 @@ def _clean_llm_json(response: str) -> Optional[Dict[str, Any]]:
 T = TypeVar('T')
 
 
+def normalize_level_labels(raw_levels, job_title: str = "", job_description: str = "") -> List[str]:
+    """Public wrapper around the level normalizer helper."""
+    return _normalize_levels(raw_levels, job_title, job_description)
+
+
 def execute_llm_tasks(
     tasks: List[Tuple[str, Callable[[], T]]],
     max_workers: Optional[int] = None
@@ -232,7 +238,7 @@ EXTRACT_SYSTEM_PROMPT = """You are an expert at parsing job postings. Extract st
 Return a JSON object with the following fields:
 - position_type: Type of position (e.g., "Assistant Professor", "Postdoc", "Research Associate")
 - field: Primary field of economics (e.g., "Public Economics", "Development Economics", "Microeconomics")
-- level: Position level(s) - if multiple levels are mentioned (e.g., "Assistant or Associate Professor"), return ALL levels as a comma-separated string (e.g., "Assistant, Associate"). If only one level, return single value (e.g., "Assistant", "Associate", "Full", "Postdoc", "Senior")
+- level: Position level(s) - focus on the JOB TITLE when mapping to one or more of these canonical labels: "Pre-doc", "Postdoc", "Assistant", "Associate", "Full", "Lecturer / Instructor", "Research", "Other". If multiple apply, return all as a forward-slash-separated string preserving the order found in the title (e.g., "Assistant / Associate").
 - requirements: Key requirements and qualifications (as a string)
 - research_areas: List of research areas mentioned
 - teaching_load: Teaching requirements if mentioned
@@ -253,7 +259,7 @@ def _build_extract_prompt(job_description: str) -> str:
         "- For extracted_deadline, parse any date mentioned in the text.\n"
         "- For application_portal_url, look for URLs to application systems, HR portals, or university job sites.\n"
         "- For country, extract the country name from the location information.\n"
-        "- For level, extract ALL position levels mentioned (e.g., if title says 'Assistant or Associate Professor', return 'Assistant, Associate'). Show all levels found, comma-separated.\n"
+        "- For level, prioritize the job title and map it into the canonical labels: Pre-doc, Postdoc, Assistant, Associate, Full, Lecturer / Instructor, Research, Other. Return the applicable labels using a single forward-slash-separated string (e.g., \"Assistant / Associate\").\n"
         "- For application_materials, list all required materials mentioned (CV, cover letter, statements, transcripts, etc.).\n"
         "- For references_separate_email, check if references should be sent to a different email address than the main application."
     )
@@ -269,6 +275,17 @@ def extract_job_details(job_description: str, raw_data: Optional[Dict] = None) -
 
         data = _clean_llm_json(response)
         if data:
+            title_hint = ""
+            if raw_data:
+                title_hint = raw_data.get("title", "") or ""
+                if not job_description and raw_data.get("description"):
+                    job_description = raw_data.get("description", "")
+            normalized_levels = normalize_level_labels(
+                data.get("level"),
+                job_title=title_hint,
+                job_description=job_description,
+            )
+            data["level"] = " / ".join(normalized_levels) if normalized_levels else ""
             logger.info("Successfully extracted job details")
             return data
         return {}
@@ -372,7 +389,7 @@ def parse_deadlines_batch(
 
 
 CLASSIFY_SYSTEM_PROMPT = """Classify the job position. Return JSON with:
-- level: Position level(s) - if multiple levels are mentioned (e.g., "Assistant or Associate Professor"), return ALL levels as a comma-separated string (e.g., "Assistant, Associate"). If only one level, return single value: "Assistant", "Associate", "Full", "Postdoc", "Other"
+- level: Position level(s) mapped to the canonical labels "Pre-doc", "Postdoc", "Assistant", "Associate", "Full", "Lecturer / Instructor", "Research", or "Other". Use the JOB TITLE as the primary signal. If multiple ranks are valid, return all as a forward-slash-separated string in ascending seniority (e.g., "Assistant / Associate").
 - type: "Tenure-track", "Tenured", "Non-tenure", "Postdoc", "Other"
 - field_focus: Primary field (e.g., "Public Economics", "Development Economics")"""
 
@@ -383,7 +400,7 @@ def _build_classify_prompt(title: str, description: str) -> str:
         f"Title: {title}\n"
         f"Description: {description[:500]}\n\n"
         "Return only valid JSON.\n"
-        "For level field: Extract ALL position levels mentioned in the title. If multiple levels are mentioned (e.g., 'Assistant or Associate Professor'), return all levels comma-separated (e.g., 'Assistant, Associate')."
+        "For level field: Prioritize the job title and map into the canonical labels: Pre-doc, Postdoc, Assistant, Associate, Full, Lecturer / Instructor, Research, Other. Include every applicable label using forward slashes (e.g., \"Assistant / Associate\")."
     )
 
 
@@ -397,6 +414,12 @@ def classify_position(title: str, description: str) -> Dict[str, str]:
 
         data = _clean_llm_json(response)
         if data:
+            normalized_levels = normalize_level_labels(
+                data.get("level"),
+                job_title=title,
+                job_description=description,
+            )
+            data["level"] = " / ".join(normalized_levels) if normalized_levels else ""
             return data
         return {"level": "Other", "type": "Other", "field_focus": ""}
     except Exception as exc:  # noqa: BLE001
@@ -418,7 +441,15 @@ def classify_position_batch(
             if not response:
                 return {"level": "Other", "type": "Other", "field_focus": ""}
             data = _clean_llm_json(response)
-            return data or {"level": "Other", "type": "Other", "field_focus": ""}
+            if data:
+                normalized_levels = normalize_level_labels(
+                    data.get("level"),
+                    job_title=title,
+                    job_description=description,
+                )
+                data["level"] = " / ".join(normalized_levels) if normalized_levels else ""
+                return data
+            return {"level": "Other", "type": "Other", "field_focus": ""}
 
         return task
 
