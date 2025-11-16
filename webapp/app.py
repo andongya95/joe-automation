@@ -704,21 +704,17 @@ def api_scrape_jobs():
                 continue
             
             # Prepare job data for database
+            # Only include fields that come directly from the scraper (not LLM-processed fields)
+            # Scraped fields: job_id, title, institution, location, description, posted_date, deadline, contact_info
             db_job = {
                 'job_id': job_id,
                 'title': job.get('title'),
                 'institution': job.get('institution'),
-                'position_type': job.get('position_type'),
-                'field': job.get('field'),
-                'level': job.get('level'),
                 'deadline': job.get('deadline'),
                 'location': job.get('location'),
                 'description': job.get('description'),
-                'requirements': job.get('requirements'),
                 'contact_info': job.get('contact_info'),
                 'posted_date': job.get('posted_date'),
-                'fit_score': job.get('fit_score'),
-                'application_status': job.get('application_status', 'new'),
             }
             
             if job_id in existing_ids:

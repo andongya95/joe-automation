@@ -20,6 +20,90 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _normalize_date(date_value: Any, preserve_on_fail: bool = False) -> Optional[str]:
+    """Normalize a date value to YYYY-MM-DD format for SQLite DATE storage.
+    
+    Args:
+        date_value: Date value that could be a string, datetime object, or None
+        preserve_on_fail: If True, preserve original value when parsing fails (for scraped data)
+        
+    Returns:
+        Date string in YYYY-MM-DD format, original value if preserve_on_fail=True and parsing fails, or None if invalid/empty
+    """
+    if date_value is None:
+        return None
+    
+    # Handle pandas Timestamp or datetime objects
+    if hasattr(date_value, 'strftime'):
+        try:
+            return date_value.strftime("%Y-%m-%d")
+        except (AttributeError, ValueError):
+            pass
+    
+    if isinstance(date_value, datetime):
+        return date_value.strftime("%Y-%m-%d")
+    
+    if not isinstance(date_value, str):
+        date_value = str(date_value)
+    
+    date_value = date_value.strip()
+    if not date_value or date_value.lower() in ('null', 'none', 'nan', ''):
+        return None
+    
+    # If already in YYYY-MM-DD format, validate and return
+    try:
+        datetime.strptime(date_value, "%Y-%m-%d")
+        return date_value
+    except ValueError:
+        pass
+    
+    # Handle datetime strings (YYYY-MM-DD HH:MM:SS) - extract just the date part
+    try:
+        if ' ' in date_value and ':' in date_value:
+            # It's a datetime string, extract just the date part
+            date_part = date_value.split(' ')[0]
+            datetime.strptime(date_part, "%Y-%m-%d")
+            return date_part
+    except (ValueError, IndexError):
+        pass
+    
+    # Try to parse common date formats and convert to YYYY-MM-DD
+    date_formats = [
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%d/%m/%Y",
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%Y/%m/%d",
+        "%d-%m-%Y",
+        "%m-%d-%Y",
+        "%Y-%m-%d %H:%M:%S",  # Handle datetime strings
+    ]
+    
+    for fmt in date_formats:
+        try:
+            date_obj = datetime.strptime(date_value, fmt)
+            return date_obj.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    
+    # If parsing fails, preserve original value if preserve_on_fail is True
+    # or if it looks like a date (for scraped data)
+    if preserve_on_fail:
+        logger.debug(f"Could not parse date value, preserving as-is: {date_value}")
+        return date_value
+    
+    # Check if it contains date-like patterns (numbers, slashes, dashes, month names)
+    if any(char.isdigit() for char in date_value) and ('/' in date_value or '-' in date_value or any(month in date_value.lower() for month in ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])):
+        # It looks like a date but we couldn't parse it - preserve it as-is
+        logger.debug(f"Could not parse date value, preserving as-is: {date_value}")
+        return date_value
+    
+    # If it doesn't look like a date at all, return None
+    logger.warning(f"Value does not appear to be a date: {date_value}")
+    return None
+
+
 DB_LOCK_PATH = Path(DATABASE_PATH).with_suffix('.lock')
 
 
@@ -78,7 +162,7 @@ def add_job(job_data: Dict[str, Any]) -> bool:
                     application_materials, references_separate_email,
                     position_track, difficulty_score, difficulty_reasoning,
                     fit_updated_at, fit_portfolio_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job_data.get('job_id'),
                 job_data.get('title'),
@@ -86,14 +170,14 @@ def add_job(job_data: Dict[str, Any]) -> bool:
                 job_data.get('position_type'),
                 job_data.get('field'),
                 job_data.get('level'),
-                job_data.get('deadline'),
-                job_data.get('extracted_deadline'),
+                _normalize_date(job_data.get('deadline'), preserve_on_fail=True),  # Preserve scraped deadline even if can't parse
+                _normalize_date(job_data.get('extracted_deadline')),
                 job_data.get('location'),
                 job_data.get('country'),
                 job_data.get('description'),
                 job_data.get('requirements'),
                 job_data.get('contact_info'),
-                job_data.get('posted_date'),
+                _normalize_date(job_data.get('posted_date')),
                 datetime.now().isoformat(),
                 job_data.get('fit_score'),
                 job_data.get('application_status', 'new'),
@@ -121,10 +205,18 @@ def update_job(job_id: str, job_data: Dict[str, Any]) -> bool:
             # Build update query dynamically based on provided fields
             fields = []
             values = []
+            date_fields = {'deadline', 'extracted_deadline', 'posted_date'}
+            
             for key, value in job_data.items():
                 if key != 'job_id' and value is not None:
                     fields.append(f"{key} = ?")
-                    values.append(value)
+                    # Normalize date fields to YYYY-MM-DD format
+                    if key in date_fields:
+                        # Preserve deadline from scraped data even if can't parse
+                        preserve = (key == 'deadline')
+                        values.append(_normalize_date(value, preserve_on_fail=preserve))
+                    else:
+                        values.append(value)
             
             if not fields:
                 return False

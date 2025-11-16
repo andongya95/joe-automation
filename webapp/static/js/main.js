@@ -6,6 +6,7 @@ let expandedJobId = null;
 let editMode = false;
 let editedJobs = {}; // Track edited jobs: {job_id: {field: value}}
 let selectedJobs = new Set(); // Track selected job IDs for bulk operations
+let lastSelectedRowIndex = null; // Track last selected row for shift+click range selection
 
 const PROGRESS_POLL_INTERVAL_MS = 1000;
 let progressPollInterval = null;
@@ -482,6 +483,8 @@ function sortJobs(jobs) {
     
     jobs.sort((a, b) => {
         let aVal, bVal;
+        let isEmptyA = false;
+        let isEmptyB = false;
         
         switch (column) {
             case 'fit_score':
@@ -493,8 +496,20 @@ function sortJobs(jobs) {
                 bVal = typeof b.difficulty_score === 'number' ? b.difficulty_score : Number.POSITIVE_INFINITY;
                 break;
             case 'deadline':
-                aVal = a.deadline || '';
-                bVal = b.deadline || '';
+            case 'extracted_deadline':
+                // Handle date sorting - convert to comparable format
+                aVal = a[column] || '';
+                bVal = b[column] || '';
+                isEmptyA = !aVal;
+                isEmptyB = !bVal;
+                // Empty dates should sort last (regardless of sort order)
+                if (isEmptyA && isEmptyB) return 0;
+                if (isEmptyA) return 1;  // a is empty, sort to end
+                if (isEmptyB) return -1; // b is empty, sort to end
+                // Extract date part if it's a datetime string
+                if (typeof aVal === 'string' && aVal.includes(' ')) aVal = aVal.split(' ')[0];
+                if (typeof bVal === 'string' && bVal.includes(' ')) bVal = bVal.split(' ')[0];
+                // Dates in YYYY-MM-DD format can be compared as strings for chronological sorting
                 break;
             case 'institution':
                 aVal = (a.institution || '').toLowerCase();
@@ -506,6 +521,14 @@ function sortJobs(jobs) {
                 break;
             default:
                 return 0;
+        }
+        
+        // Handle empty values for date columns - always sort to end
+        if (isEmptyA || isEmptyB) {
+            // This should have been handled above, but just in case
+            if (isEmptyA && isEmptyB) return 0;
+            if (isEmptyA) return 1;
+            if (isEmptyB) return -1;
         }
         
         if (aVal < bVal) return reverse ? 1 : -1;
@@ -603,6 +626,62 @@ function renderJobs() {
     // Attach checkbox event listeners after rendering
     document.querySelectorAll('.job-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', handleJobSelection);
+        checkbox.addEventListener('click', function(e) {
+            // Prevent default to handle shift+click properly
+            if (e.shiftKey) {
+                e.preventDefault();
+                this.checked = !this.checked;
+                handleJobSelection(e);
+            }
+        });
+    });
+    
+    // Also support clicking on the row itself (not just checkbox) for shift+click
+    document.querySelectorAll('#jobsTableBody tr[data-job-id]').forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Only handle if clicking on the row itself, not on interactive elements
+            if (e.target.tagName !== 'INPUT' && 
+                e.target.tagName !== 'SELECT' && 
+                e.target.tagName !== 'BUTTON' && 
+                e.target.tagName !== 'A' &&
+                !e.target.closest('button') &&
+                !e.target.closest('a') &&
+                !e.target.closest('select')) {
+                const checkbox = this.querySelector('.job-checkbox');
+                if (checkbox) {
+                    if (e.shiftKey && lastSelectedRowIndex !== null) {
+                        e.preventDefault();
+                        const allRows = Array.from(document.querySelectorAll('#jobsTableBody tr[data-job-id]'));
+                        const currentRowIndex = allRows.indexOf(this);
+                        const startIndex = Math.min(lastSelectedRowIndex, currentRowIndex);
+                        const endIndex = Math.max(lastSelectedRowIndex, currentRowIndex);
+                        const rangeRows = allRows.slice(startIndex, endIndex + 1);
+                        
+                        rangeRows.forEach(rangeRow => {
+                            const rangeJobId = rangeRow.dataset.jobId;
+                            const rangeCheckbox = rangeRow.querySelector('.job-checkbox');
+                            if (rangeCheckbox) {
+                                rangeCheckbox.checked = true;
+                                selectedJobs.add(rangeJobId);
+                            }
+                        });
+                        lastSelectedRowIndex = currentRowIndex;
+                    } else {
+                        checkbox.checked = !checkbox.checked;
+                        const jobId = checkbox.dataset.jobId;
+                        if (checkbox.checked) {
+                            selectedJobs.add(jobId);
+                        } else {
+                            selectedJobs.delete(jobId);
+                        }
+                        const allRows = Array.from(document.querySelectorAll('#jobsTableBody tr[data-job-id]'));
+                        lastSelectedRowIndex = allRows.indexOf(this);
+                    }
+                    updateBulkActionsVisibility();
+                    updateSelectAllCheckbox();
+                }
+            }
+        });
     });
     
     // Attach status dropdown event listeners
@@ -770,12 +849,39 @@ function clearFilters() {
 
 // Bulk selection functions
 function handleJobSelection(event) {
-    const jobId = event.target.dataset.jobId;
-    if (event.target.checked) {
-        selectedJobs.add(jobId);
+    const checkbox = event.target;
+    const jobId = checkbox.dataset.jobId;
+    const row = checkbox.closest('tr');
+    const allRows = Array.from(document.querySelectorAll('#jobsTableBody tr[data-job-id]'));
+    const currentRowIndex = allRows.indexOf(row);
+    
+    // Handle shift+click for range selection
+    if (event.shiftKey && lastSelectedRowIndex !== null && currentRowIndex !== -1) {
+        event.preventDefault();
+        const startIndex = Math.min(lastSelectedRowIndex, currentRowIndex);
+        const endIndex = Math.max(lastSelectedRowIndex, currentRowIndex);
+        const rangeRows = allRows.slice(startIndex, endIndex + 1);
+        
+        // Select all rows in range
+        rangeRows.forEach(rangeRow => {
+            const rangeJobId = rangeRow.dataset.jobId;
+            const rangeCheckbox = rangeRow.querySelector('.job-checkbox');
+            if (rangeCheckbox) {
+                rangeCheckbox.checked = true;
+                selectedJobs.add(rangeJobId);
+            }
+        });
     } else {
-        selectedJobs.delete(jobId);
+        // Normal click - toggle single selection
+        if (checkbox.checked) {
+            selectedJobs.add(jobId);
+        } else {
+            selectedJobs.delete(jobId);
+        }
+        // Update last selected row index
+        lastSelectedRowIndex = currentRowIndex;
     }
+    
     updateBulkActionsVisibility();
     updateSelectAllCheckbox();
 }
@@ -811,6 +917,7 @@ function deselectAll() {
         checkbox.checked = false;
     });
     document.getElementById('selectAllCheckbox').checked = false;
+    lastSelectedRowIndex = null;
     updateBulkActionsVisibility();
 }
 

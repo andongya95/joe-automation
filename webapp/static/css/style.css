@@ -17,9 +17,11 @@ body {
 }
 
 .container {
-    max-width: 1400px;
+    width: 100%;
+    max-width: 100%;
     margin: 0 auto;
     padding: 20px;
+    box-sizing: border-box;
 }
 
 /* Header */
@@ -533,11 +535,15 @@ td.editable.edited {
     overflow: hidden;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     overflow-x: auto;
+    width: 100%;
+    max-width: 100%;
 }
 
 table {
     width: 100%;
+    max-width: 100%;
     border-collapse: collapse;
+    table-layout: auto;
 }
 
 thead {

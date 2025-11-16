@@ -72,8 +72,24 @@ def parse_job_listings(data: bytes) -> List[Dict[str, Any]]:
                 institution = str(row.get('jp_institution', '')).strip()
                 description = str(row.get('jp_full_text', '')).strip()
                 location = str(row.get('locations', '')).strip()
-                deadline = str(row.get('Application_deadline', '')).strip()
-                posted_date = str(row.get('Date_Active', '')).strip()
+                # Handle dates - pandas may return Timestamp objects
+                deadline_raw = row.get('Application_deadline')
+                if deadline_raw is not None and hasattr(deadline_raw, 'strftime'):
+                    # It's a pandas Timestamp or datetime object
+                    deadline = deadline_raw.strftime("%Y-%m-%d")
+                elif pd.notna(deadline_raw):
+                    deadline = str(deadline_raw).strip()
+                else:
+                    deadline = ''
+                
+                posted_date_raw = row.get('Date_Active')
+                if posted_date_raw is not None and hasattr(posted_date_raw, 'strftime'):
+                    # It's a pandas Timestamp or datetime object
+                    posted_date = posted_date_raw.strftime("%Y-%m-%d")
+                elif pd.notna(posted_date_raw):
+                    posted_date = str(posted_date_raw).strip()
+                else:
+                    posted_date = ''
                 section = str(row.get('jp_section', '')).strip()
                 keywords = str(row.get('jp_keywords', '')).strip()
                 jel_classifications = str(row.get('JEL_Classifications', '')).strip()
