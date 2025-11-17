@@ -54,12 +54,36 @@ ANTHROPIC_API_KEY = _get_secret("ANTHROPIC_API_KEY", "")
 MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-chat")
 
 # LLM concurrency settings
-LLM_MAX_CONCURRENCY = int(os.getenv("LLM_MAX_CONCURRENCY", "20"))
-LLM_MIN_CALL_INTERVAL = float(os.getenv("LLM_MIN_CALL_INTERVAL", "1.0"))
-LLM_PROCESSING_BATCH_SIZE = int(os.getenv("LLM_PROCESSING_BATCH_SIZE", "20"))  # Process and save in batches
+def _get_int_env(key: str, default: int) -> int:
+    """Safely get integer from environment variable."""
+    try:
+        value = os.getenv(key)
+        if value is None:
+            return default
+        return int(value)
+    except (ValueError, TypeError):
+        import logging
+        logging.warning(f"Invalid value for {key}, using default: {default}")
+        return default
+
+def _get_float_env(key: str, default: float) -> float:
+    """Safely get float from environment variable."""
+    try:
+        value = os.getenv(key)
+        if value is None:
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        import logging
+        logging.warning(f"Invalid value for {key}, using default: {default}")
+        return default
+
+LLM_MAX_CONCURRENCY = _get_int_env("LLM_MAX_CONCURRENCY", 20)
+LLM_MIN_CALL_INTERVAL = _get_float_env("LLM_MIN_CALL_INTERVAL", 1.0)
+LLM_PROCESSING_BATCH_SIZE = _get_int_env("LLM_PROCESSING_BATCH_SIZE", 20)  # Process and save in batches
 
 # Scraping settings
-SCRAPE_INTERVAL_HOURS = int(os.getenv("SCRAPE_INTERVAL_HOURS", "6"))
+SCRAPE_INTERVAL_HOURS = _get_int_env("SCRAPE_INTERVAL_HOURS", 6)
 JOE_EXPORT_URL = os.getenv(
     "JOE_EXPORT_URL",
     "https://www.aeaweb.org/joe/resultset_xls_output.php?mode=xls_xml"

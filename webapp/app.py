@@ -136,7 +136,14 @@ def api_get_jobs():
         order = request.args.get('order', 'desc')
         
         # Get all jobs
-        jobs = get_all_jobs(status=status, min_fit_score=float(min_fit_score) if min_fit_score else None)
+        min_score = None
+        if min_fit_score:
+            try:
+                min_score = float(min_fit_score)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid min_fit_score value: {min_fit_score}, ignoring")
+                min_score = None
+        jobs = get_all_jobs(status=status, min_fit_score=min_score)
         
         # Apply additional filters
         if field:
