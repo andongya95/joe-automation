@@ -253,6 +253,7 @@ function setupEventListeners() {
     document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
     document.getElementById('clearFilters').addEventListener('click', clearFilters);
     document.getElementById('scrapeButton').addEventListener('click', triggerScrape);
+    document.getElementById('csvUploadInput').addEventListener('change', handleCsvUpload);
     document.getElementById('processButton').addEventListener('click', triggerProcess);
     const matchButton = document.getElementById('matchButton');
     matchButton.addEventListener('click', () => {
@@ -1669,6 +1670,77 @@ function cancelEdit() {
     
     // Reload jobs to reset table
     renderJobs();
+}
+
+// Handle CSV upload for listing IDs
+async function handleCsvUpload(event) {
+    const file = event.target.files[0];
+    if (!file) {
+        return;
+    }
+    
+    if (!file.name.endsWith('.csv')) {
+        alert('Please select a CSV file');
+        event.target.value = ''; // Reset file input
+        return;
+    }
+    
+    if (!confirm(`Upload CSV file "${file.name}" and add new listings to database?`)) {
+        event.target.value = ''; // Reset file input
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        // Show loading indicator
+        const uploadBtn = document.querySelector('label[for="csvUploadInput"]');
+        const originalText = uploadBtn.textContent.trim();
+        uploadBtn.textContent = 'Uploading...';
+        uploadBtn.style.opacity = '0.6';
+        uploadBtn.style.pointerEvents = 'none';
+        
+        const response = await fetch('/api/jobs/upload-csv', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        // Reset button
+        uploadBtn.textContent = originalText;
+        uploadBtn.style.opacity = '1';
+        uploadBtn.style.pointerEvents = 'auto';
+        event.target.value = ''; // Reset file input
+        
+        if (data.success) {
+            let message = data.message || 'CSV upload completed';
+            if (data.added > 0 || data.skipped > 0 || data.failed > 0) {
+                message += `\n\nAdded: ${data.added}\nSkipped: ${data.skipped}\nFailed: ${data.failed}`;
+                if (data.failed > 0 && data.failed_ids && data.failed_ids.length > 0) {
+                    message += `\n\nFailed IDs (first 10): ${data.failed_ids.join(', ')}`;
+                }
+            }
+            alert(message);
+            
+            // Reload jobs and stats
+            await loadJobs();
+            await loadStats();
+        } else {
+            alert('Failed to upload CSV: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error uploading CSV:', error);
+        alert('Error uploading CSV: ' + error.message);
+        
+        // Reset button
+        const uploadBtn = document.querySelector('label[for="csvUploadInput"]');
+        uploadBtn.textContent = 'Upload CSV Listings';
+        uploadBtn.style.opacity = '1';
+        uploadBtn.style.pointerEvents = 'auto';
+        event.target.value = ''; // Reset file input
+    }
 }
 
 function showError(message) {

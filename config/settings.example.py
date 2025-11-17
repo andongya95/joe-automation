@@ -1,37 +1,82 @@
 """Example configuration file. Copy this to settings.py and fill in your values."""
 
+import json
 import os
 from pathlib import Path
+
+try:
+    from dotenv import load_dotenv  # type: ignore
+except ImportError:  # pragma: no cover
+    def load_dotenv(*_, **__):
+        """Fallback no-op if python-dotenv is not installed."""
+        return False
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Base directory
 BASE_DIR = Path(__file__).parent.parent
 
-# Database configuration
-DATABASE_PATH = str(BASE_DIR / "data" / "job_listings.db")
 
-# Portfolio path
-PORTFOLIO_PATH = str(BASE_DIR / "portfolio")
+# ---------------------------------------------------------------------------
+# Secret management helpers
+# ---------------------------------------------------------------------------
+SECRET_FILE = Path(__file__).with_name("secret.json")
 
-# LLM Provider: 'deepseek', 'openai', or 'anthropic'
-LLM_PROVIDER = 'deepseek'
 
-# API Keys
-# Preferred order: environment variables -> config/secret.json -> defaults
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+def _load_secrets() -> dict:
+    """Load secrets from secret.json if present."""
+    if not SECRET_FILE.exists():
+        return {}
+    try:
+        with SECRET_FILE.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
-# AEA JOE scraping URL
-AEA_JOE_URL = "https://www.aeaweb.org/joe/listings/xls"
 
-# Research focal areas for matching
+_SECRETS = _load_secrets()
+
+
+def _get_secret(key: str, default: str = "") -> str:
+    """Read value from env first, then fall back to secret.json."""
+    return os.getenv(key) or _SECRETS.get(key, default) or default
+
+# Database settings
+DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "data" / "job_listings.db"))
+
+# LLM settings
+LLM_PROVIDER = _get_secret("LLM_PROVIDER", "deepseek").lower()
+DEEPSEEK_API_KEY = _get_secret("DEEPSEEK_API_KEY", "")
+OPENAI_API_KEY = _get_secret("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = _get_secret("ANTHROPIC_API_KEY", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-chat")
+
+# LLM concurrency settings
+LLM_MAX_CONCURRENCY = int(os.getenv("LLM_MAX_CONCURRENCY", "20"))
+LLM_MIN_CALL_INTERVAL = float(os.getenv("LLM_MIN_CALL_INTERVAL", "1.0"))
+LLM_PROCESSING_BATCH_SIZE = int(os.getenv("LLM_PROCESSING_BATCH_SIZE", "20"))  # Process and save in batches
+
+# Scraping settings
+SCRAPE_INTERVAL_HOURS = int(os.getenv("SCRAPE_INTERVAL_HOURS", "6"))
+JOE_EXPORT_URL = os.getenv(
+    "JOE_EXPORT_URL",
+    "https://www.aeaweb.org/joe/resultset_xls_output.php?mode=xls_xml"
+)
+
+# Portfolio settings
+PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", str(BASE_DIR / "portfolio"))
+
+# Matching criteria
 RESEARCH_FOCAL_AREAS = [
-    "Labor Economics",
-    "Development Economics",
-    "Applied Microeconomics",
+    "public economics",
+    "development economics",
+    "microeconomics",
     # Add your research areas here
 ]
 
-# Verbose logging
-VERBOSE = False
+# Logging settings
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+VERBOSE = os.getenv("VERBOSE", "false").lower() == "true"
 

@@ -345,6 +345,18 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_all_job_ids() -> List[str]:
+    """Get all existing job IDs from the database."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT job_id FROM job_postings")
+            return [row[0] for row in cursor.fetchall() if row[0]]
+    except Exception as e:
+        logger.error(f"Failed to get job IDs: {e}")
+        return []
+
+
 def get_all_jobs(
     status: Optional[str] = None,
     min_fit_score: Optional[float] = None,

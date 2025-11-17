@@ -367,6 +367,28 @@ table td ul li {
     animation: pulse 1.5s ease-in-out infinite;
 }
 
+.btn-upload {
+    display: inline-block;
+    padding: 10px 20px;
+    background-color: #10b981;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: 500;
+    transition: background-color 0.3s;
+    text-align: center;
+}
+
+.btn-upload:hover {
+    background-color: #059669;
+}
+
+.btn-upload input[type="file"] {
+    display: none;
+}
+
 #matchButton {
     padding: 10px 20px;
     background-color: #8b5cf6;

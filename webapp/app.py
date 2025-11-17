@@ -11,9 +11,10 @@ from typing import Dict, Any, Optional, Tuple, List
 
 from database import (
     get_all_jobs, get_job, update_job, init_database,
-    add_job, mark_expired, create_backup_if_changed, needs_llm_processing, needs_fit_recompute
+    add_job, mark_expired, create_backup_if_changed, needs_llm_processing, needs_fit_recompute,
+    get_all_job_ids
 )
-from scraper import download_job_data, parse_job_listings
+from scraper import download_job_data, parse_job_listings, scrape_listing_by_id
 from processor import (
     extract_job_details,
     parse_deadlines,
@@ -1090,6 +1091,137 @@ def api_update_jobs_batch():
         
     except Exception as e:
         logger.error(f"Error in api_update_jobs_batch: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/jobs/upload-csv', methods=['POST'])
+def api_upload_csv_listings():
+    """Upload CSV file with listing IDs and add new listings to database."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'No file provided'
+            }), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({
+                'success': False,
+                'error': 'No file selected'
+            }), 400
+        
+        if not file.filename.endswith('.csv'):
+            return jsonify({
+                'success': False,
+                'error': 'File must be a CSV file'
+            }), 400
+        
+        # Read CSV file
+        import csv
+        import io
+        
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.reader(stream)
+        
+        # Extract job IDs from CSV
+        # Support both single column and multiple columns (use first column)
+        job_ids = []
+        for row_num, row in enumerate(csv_reader, start=1):
+            if not row or not row[0].strip():
+                continue
+            # Get first column, strip whitespace
+            job_id = row[0].strip()
+            # Skip header row if it looks like a header
+            if row_num == 1 and job_id.lower() in ('id', 'job_id', 'listing_id', 'joe_id', 'jp_id'):
+                continue
+            if job_id:
+                job_ids.append(job_id)
+        
+        if not job_ids:
+            return jsonify({
+                'success': False,
+                'error': 'No job IDs found in CSV file'
+            }), 400
+        
+        logger.info(f"Processing {len(job_ids)} job IDs from CSV upload")
+        
+        # Get existing job IDs
+        existing_ids = set(get_all_job_ids())
+        logger.info(f"Found {len(existing_ids)} existing job IDs in database")
+        
+        # Filter out existing IDs
+        new_ids = [job_id for job_id in job_ids if job_id not in existing_ids]
+        skipped_ids = [job_id for job_id in job_ids if job_id in existing_ids]
+        
+        logger.info(f"Found {len(new_ids)} new IDs to scrape, {len(skipped_ids)} existing IDs to skip")
+        
+        if not new_ids:
+            return jsonify({
+                'success': True,
+                'message': f'All {len(skipped_ids)} listing IDs already exist in database',
+                'added': 0,
+                'skipped': len(skipped_ids),
+                'failed': 0
+            })
+        
+        # Scrape and add new listings
+        added_count = 0
+        failed_count = 0
+        failed_ids = []
+        
+        for job_id in new_ids:
+            try:
+                logger.info(f"Scraping listing {job_id}...")
+                job_data = scrape_listing_by_id(job_id)
+                
+                if job_data and job_data.get('job_id'):
+                    # Ensure job_id matches
+                    job_data['job_id'] = job_id
+                    
+                    # Add to database
+                    if add_job(job_data):
+                        added_count += 1
+                        logger.info(f"Successfully added listing {job_id}")
+                    else:
+                        failed_count += 1
+                        failed_ids.append(job_id)
+                        logger.warning(f"Failed to add listing {job_id} to database")
+                else:
+                    failed_count += 1
+                    failed_ids.append(job_id)
+                    logger.warning(f"Failed to scrape listing {job_id}")
+                    
+            except Exception as e:
+                failed_count += 1
+                failed_ids.append(job_id)
+                logger.error(f"Error processing listing {job_id}: {e}", exc_info=True)
+        
+        # Create backup after adding new listings
+        if added_count > 0:
+            try:
+                create_backup_if_changed()
+            except Exception as e:
+                logger.warning(f"Failed to create backup: {e}")
+        
+        message = f'Processed {len(job_ids)} listing IDs: {added_count} added, {len(skipped_ids)} skipped'
+        if failed_count > 0:
+            message += f', {failed_count} failed'
+        
+        return jsonify({
+            'success': True,
+            'message': message,
+            'added': added_count,
+            'skipped': len(skipped_ids),
+            'failed': failed_count,
+            'failed_ids': failed_ids[:10]  # Return first 10 failed IDs
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in api_upload_csv_listings: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
