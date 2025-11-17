@@ -1500,12 +1500,15 @@ function enterEditMode(jobId) {
     
     // Make editable fields
     // Column order reference:
-    // checkbox(0), fit_score(1), position_track(2), difficulty_score(3), title(4), institution(5), field(6), level(7), deadline(8),
-    // extracted_deadline(9), location(10), country(11), status(12), application_materials(13), references_separate_email(14),
-    // application_portal(15), link(16), actions(17)
+    // checkbox(0), job_id(1), fit_score(2), position_track(3), difficulty_score(4), title(5), institution(6), field(7), level(8), deadline(9),
+    // extracted_deadline(10), location(11), country(12), status(13), application_materials(14), references_separate_email(15),
+    // application_portal(16), link(17), actions(18)
     const editableFields = ['title', 'institution', 'field', 'level', 'deadline', 'extracted_deadline', 'location', 'country', 'application_status', 'application_materials', 'application_portal_url'];
-    const editableIndices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]; // Corresponding cell indices
+    const editableIndices = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16]; // Corresponding cell indices
     const cells = row.querySelectorAll('td');
+    
+    // Get the original job data for accurate field values
+    const job = filteredJobs.find(j => j.job_id === jobId) || allJobs.find(j => j.job_id === jobId);
     
     editableFields.forEach((field, index) => {
         const cellIndex = editableIndices[index];
@@ -1513,22 +1516,39 @@ function enterEditMode(jobId) {
             const cell = cells[cellIndex];
             let currentValue = cell.textContent.trim();
             
-            // For status, extract from badge
-            if (field === 'application_status') {
-                const badge = cell.querySelector('.status-badge');
-                if (badge) {
-                    currentValue = badge.textContent.trim().toLowerCase();
-                }
-            }
-            
-            // For application portal, extract from link or badge
-            if (field === 'application_portal_url') {
-                const link = cell.querySelector('.btn-portal');
-                if (link) {
-                    currentValue = link.href || '';
+            // For date fields, use original value from job data (YYYY-MM-DD format)
+            if (field === 'deadline' || field === 'extracted_deadline') {
+                if (job && job[field]) {
+                    // Extract date part if it's a datetime string
+                    const dateStr = job[field].includes(' ') ? job[field].split(' ')[0] : job[field];
+                    currentValue = dateStr;
                 } else {
                     currentValue = '';
                 }
+            }
+            // For status, extract from select dropdown
+            else if (field === 'application_status') {
+                const select = cell.querySelector('select.status-dropdown');
+                if (select) {
+                    currentValue = select.value || 'new';
+                } else if (job) {
+                    currentValue = job.application_status || 'new';
+                }
+            }
+            // For application portal, extract from link or badge
+            else if (field === 'application_portal_url') {
+                const link = cell.querySelector('.btn-portal');
+                if (link) {
+                    currentValue = link.href || '';
+                } else if (job) {
+                    currentValue = job.application_portal_url || '';
+                } else {
+                    currentValue = '';
+                }
+            }
+            // For other fields, use job data if available, otherwise use cell text
+            else if (job && job[field] !== undefined && job[field] !== null) {
+                currentValue = String(job[field]);
             }
             
             // For references_separate_email, extract from badge
@@ -1543,16 +1563,17 @@ function enterEditMode(jobId) {
                 // Status dropdown
                 cell.innerHTML = `
                     <select data-field="${field}" data-job-id="${jobId}">
+                        <option value="pending" ${currentValue === 'pending' ? 'selected' : ''}>pending</option>
                         <option value="new" ${currentValue === 'new' ? 'selected' : ''}>new</option>
                         <option value="applied" ${currentValue === 'applied' ? 'selected' : ''}>applied</option>
                         <option value="expired" ${currentValue === 'expired' ? 'selected' : ''}>expired</option>
                         <option value="rejected" ${currentValue === 'rejected' ? 'selected' : ''}>rejected</option>
+                        <option value="unrelated" ${currentValue === 'unrelated' ? 'selected' : ''}>unrelated</option>
                     </select>
                 `;
             } else if (field === 'deadline' || field === 'extracted_deadline') {
-                // Date input
-                const dateValue = currentValue !== 'N/A' ? currentValue : '';
-                cell.innerHTML = `<input type="date" data-field="${field}" data-job-id="${jobId}" value="${dateValue}">`;
+                // Date input - currentValue is already in YYYY-MM-DD format
+                cell.innerHTML = `<input type="date" data-field="${field}" data-job-id="${jobId}" value="${currentValue}">`;
             } else if (field === 'references_separate_email') {
                 // Boolean checkbox
                 const isChecked = currentValue === '1' || currentValue === 'Yes' || currentValue.toLowerCase() === 'yes';
