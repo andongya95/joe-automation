@@ -128,8 +128,9 @@
             </div>
         </div>
 
-        <div class="table-container">
-            <table id="jobsTable">
+        <div class="table-wrapper">
+            <div class="table-container" id="tableContainer">
+                <table id="jobsTable">
                 <thead>
                     <tr>
                         <th data-column="checkbox"><input type="checkbox" id="selectAllCheckbox" title="Select All"></th>
@@ -159,6 +160,8 @@
                     </tr>
                 </tbody>
             </table>
+            </div>
+            <div class="sticky-scrollbar" id="stickyScrollbar"></div>
         </div>
 
         <!-- Column Settings Modal -->

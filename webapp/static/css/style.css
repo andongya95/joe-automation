@@ -551,19 +551,70 @@ td.editable.edited {
 }
 
 /* Table */
+.table-wrapper {
+    position: relative;
+}
+
 .table-container {
     background: white;
-    border-radius: 10px;
-    overflow: hidden;
+    border-radius: 10px 10px 0 0;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     overflow-x: auto;
+    overflow-y: visible;
     width: 100%;
     max-width: 100%;
+    /* Firefox scrollbar styling */
+    scrollbar-width: thin;
+    scrollbar-color: #888 #f1f1f1;
+    /* Hide the native scrollbar */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.table-container::-webkit-scrollbar {
+    display: none;
+}
+
+/* Sticky horizontal scrollbar at bottom of viewport */
+.sticky-scrollbar {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 12px;
+    background: #f1f1f1;
+    z-index: 1000;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 0 0 10px 10px;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+    /* Firefox scrollbar styling */
+    scrollbar-width: thin;
+    scrollbar-color: #888 #f1f1f1;
+}
+
+/* Custom scrollbar styling for sticky horizontal scrollbar (Webkit browsers) */
+.sticky-scrollbar::-webkit-scrollbar {
+    height: 12px;
+}
+
+.sticky-scrollbar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 0 0 10px 10px;
+}
+
+.sticky-scrollbar::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 0 0 10px 10px;
+}
+
+.sticky-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #555;
 }
 
 table {
     width: 100%;
-    max-width: 100%;
+    min-width: max-content;
     border-collapse: collapse;
     table-layout: auto;
 }

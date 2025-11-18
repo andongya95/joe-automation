@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Import modules
 from database import (
-    init_database, add_job, update_job, get_job, get_all_jobs, mark_expired,
+    init_database, add_job, update_job, get_job, get_all_jobs,
     create_backup_if_changed, needs_llm_processing, needs_fit_recompute
 )
 from scraper import download_job_data, parse_job_listings, identify_new_postings
@@ -595,11 +595,6 @@ def update_database(jobs: List[Dict[str, Any]]) -> tuple[int, int]:
         
         logger.info(f"Database updated: {new_count} new jobs, {updated_count} updated jobs")
         
-        # Mark expired jobs
-        expired_count = mark_expired()
-        if expired_count > 0:
-            logger.info(f"Marked {expired_count} jobs as expired")
-        
         return new_count, updated_count
         
     except Exception as e:
@@ -863,34 +858,13 @@ def main():
             # Save scraped data to database first (without LLM processing)
             new_count, updated_count = update_database(jobs)
             logger.info(f"Scraped data saved: {new_count} new, {updated_count} updated")
-            auto_processed = 0
-            auto_matched_recomputed = 0
-            auto_matched_skipped = 0
 
             if new_count > 0:
-                if new_count <= 100:
-                    logger.info("Automatically processing %d new postings with LLM...", new_count)
-                    try:
-                        auto_processed = process_jobs_incrementally(limit=new_count)
-                        logger.info("Auto LLM processing complete: %d jobs processed", auto_processed)
-                        try:
-                            jobs_after_process = get_all_jobs()
-                            _, auto_matched_recomputed, auto_matched_skipped = match_jobs(jobs_after_process, force=False)
-                            logger.info(
-                                "Auto matching complete: %d recomputed, %d skipped",
-                                auto_matched_recomputed,
-                                auto_matched_skipped
-                            )
-                        except Exception as auto_match_error:  # noqa: BLE001
-                            logger.error("Automatic matching failed: %s", auto_match_error)
-                    except Exception as auto_error:  # noqa: BLE001
-                        logger.error("Automatic LLM processing failed: %s", auto_error)
-                else:
-                    logger.warning(
-                        "There are %d newly scraped postings pending LLM processing. "
-                        "Run with --process to parse them.",
-                        new_count
-                    )
+                logger.info(
+                    "There are %d newly scraped postings pending LLM processing. "
+                    "Run with --process to parse them.",
+                    new_count
+                )
 
             try:
                 total_pending = sum(1 for job in get_all_jobs() if _needs_llm_processing(job))

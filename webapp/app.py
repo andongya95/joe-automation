@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, Tuple, List
 
 from database import (
     get_all_jobs, get_job, update_job, init_database,
-    add_job, mark_expired, create_backup_if_changed, needs_llm_processing, needs_fit_recompute,
+    add_job, create_backup_if_changed, needs_llm_processing, needs_fit_recompute,
     get_all_job_ids
 )
 from scraper import download_job_data, parse_job_listings, scrape_listing_by_id
@@ -755,9 +755,6 @@ def api_scrape_jobs():
                 # Add new job
                 if add_job(db_job):
                     new_jobs.append(job_id)
-        
-        # Mark expired jobs
-        mark_expired()
 
         try:
             pending_llm = sum(

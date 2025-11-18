@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadFilters();
     loadJobs();
     setupEventListeners();
+    setupStickyScrollbar();
 });
 
 function showProgressPanel(operation) {
@@ -242,6 +243,53 @@ async function runMatchAfterScrape(autoTriggered = false, force = false) {
 }
 
 // Setup event listeners
+function setupStickyScrollbar() {
+    const tableContainer = document.getElementById('tableContainer');
+    const stickyScrollbar = document.getElementById('stickyScrollbar');
+    
+    if (!tableContainer || !stickyScrollbar) return;
+    
+    // Create a spacer element inside sticky scrollbar to match table width
+    const spacer = document.createElement('div');
+    spacer.style.width = tableContainer.scrollWidth + 'px';
+    spacer.style.height = '1px';
+    stickyScrollbar.appendChild(spacer);
+    
+    // Sync scrollbar with table scroll
+    let isScrolling = false;
+    
+    tableContainer.addEventListener('scroll', () => {
+        if (!isScrolling) {
+            isScrolling = true;
+            stickyScrollbar.scrollLeft = tableContainer.scrollLeft;
+            isScrolling = false;
+        }
+    });
+    
+    stickyScrollbar.addEventListener('scroll', () => {
+        if (!isScrolling) {
+            isScrolling = true;
+            tableContainer.scrollLeft = stickyScrollbar.scrollLeft;
+            isScrolling = false;
+        }
+    });
+    
+    // Update spacer width when table content changes
+    const updateSpacerWidth = () => {
+        spacer.style.width = tableContainer.scrollWidth + 'px';
+    };
+    
+    // Update on window resize and after table updates
+    window.addEventListener('resize', updateSpacerWidth);
+    
+    // Observe table changes
+    const observer = new MutationObserver(updateSpacerWidth);
+    observer.observe(tableContainer, { childList: true, subtree: true, attributes: true });
+    
+    // Initial update
+    updateSpacerWidth();
+}
+
 function setupEventListeners() {
     // Filters
     document.getElementById('filterStatus').addEventListener('change', applyFilters);
@@ -696,6 +744,15 @@ function renderJobs() {
     // Apply column configuration after rendering
     applyColumnConfig();
     setupColumnResizing();
+    
+    // Update sticky scrollbar spacer width after rendering
+    const stickyScrollbar = document.getElementById('stickyScrollbar');
+    if (stickyScrollbar && stickyScrollbar.firstChild) {
+        const tableContainer = document.getElementById('tableContainer');
+        if (tableContainer) {
+            stickyScrollbar.firstChild.style.width = tableContainer.scrollWidth + 'px';
+        }
+    }
 }
 
 // View job details
@@ -1356,36 +1413,9 @@ async function triggerScrape() {
             alert(alertMessage);
             
             // Reload jobs and stats
-            let processHandled = false;
-            let matchHandled = false;
-            if (typeof data.new_count === 'number' && data.new_count > 0) {
-                if (data.new_count > 100) {
-                    const userWantsProcess = confirm(`There are ${data.new_count} new postings.\nDo you want to run LLM processing now?`);
-                    if (userWantsProcess) {
-                        processHandled = await runProcessAfterScrape(false);
-                        if (processHandled) {
-                            const userWantsMatch = confirm('Run Match Fit Scores now?');
-                            if (userWantsMatch) {
-                                matchHandled = await runMatchAfterScrape(false);
-                            }
-                        }
-                    } else {
-                        const userWantsMatchOnly = confirm('Skip LLM processing but run Match Fit Scores now?');
-                        if (userWantsMatchOnly) {
-                            matchHandled = await runMatchAfterScrape(false);
-                        }
-                    }
-                } else {
-                    processHandled = await runProcessAfterScrape(true);
-                    matchHandled = await runMatchAfterScrape(true);
-                }
-            }
-
-            if (!processHandled && !matchHandled) {
-                await loadJobs();
-                await loadStats();
-                await loadFilters();
-            }
+            await loadJobs();
+            await loadStats();
+            await loadFilters();
         } else {
             alert('Scraping failed: ' + (data.error || 'Unknown error'));
         }

@@ -73,7 +73,6 @@ def main() -> None:
           AND (application_materials IS NULL OR TRIM(application_materials) = '')
           AND (references_separate_email IS NULL OR references_separate_email = 0)
           AND (position_track IS NULL OR TRIM(position_track) = '')
-          AND (difficulty_score IS NULL)
         """
     ).fetchone()[0]
 
@@ -98,7 +97,6 @@ def main() -> None:
               AND (application_materials IS NULL OR TRIM(application_materials) = '')
               AND (references_separate_email IS NULL OR references_separate_email = 0)
               AND (position_track IS NULL OR TRIM(position_track) = '')
-              AND (difficulty_score IS NULL)
             LIMIT 5
             """
         ).fetchall()
