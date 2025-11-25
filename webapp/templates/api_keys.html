@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Key Management - AEA JOE Automation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .api-keys-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .api-key-form {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 25px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .form-group input[type="password"] {
+            font-family: monospace;
+        }
+        .key-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
+        }
+        .key-status.has-key {
+            color: #28a745;
+        }
+        .key-status.no-key {
+            color: #dc3545;
+        }
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        .btn-save {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-save:hover {
+            background-color: #0056b3;
+        }
+        .btn-cancel {
+            background-color: #6c757d;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+        }
+        .btn-cancel:hover {
+            background-color: #545b62;
+        }
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container api-keys-container">
+        <header>
+            <h1>API Key Management</h1>
+            <nav class="main-nav">
+                <a href="{{ url_for('index') }}" class="nav-link">← Back to Dashboard</a>
+                <a href="{{ url_for('portfolio_page') }}" class="nav-link">Portfolio Management →</a>
+            </nav>
+        </header>
+
+        {% if message %}
+            <div class="alert alert-success">{{ message }}</div>
+        {% elif error %}
+            <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+
+        <div class="api-key-form">
+            <p style="margin-bottom: 20px; color: #666;">
+                Enter your LLM API keys below. Existing keys are not displayed for security.
+                Leave fields empty to keep existing keys unchanged.
+            </p>
+
+            <form method="post">
+                <div class="form-group">
+                    <label for="llm_provider">LLM Provider</label>
+                    <select id="llm_provider" name="llm_provider">
+                        <option value="deepseek" {% if current_provider == 'deepseek' %}selected{% endif %}>DeepSeek</option>
+                        <option value="openai" {% if current_provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                        <option value="anthropic" {% if current_provider == 'anthropic' %}selected{% endif %}>Anthropic</option>
+                    </select>
+                    <div class="help-text">Select the LLM provider you want to use</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="deepseek_api_key">DeepSeek API Key</label>
+                    <input type="password" id="deepseek_api_key" name="deepseek_api_key" placeholder="Enter new DeepSeek API key (leave empty to keep existing)" autocomplete="off">
+                    <div class="key-status {% if has_deepseek %}has-key{% else %}no-key{% endif %}">
+                        {% if has_deepseek %}✓ Key is set{% else %}✗ No key set{% endif %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="openai_api_key">OpenAI API Key</label>
+                    <input type="password" id="openai_api_key" name="openai_api_key" placeholder="Enter new OpenAI API key (leave empty to keep existing)" autocomplete="off">
+                    <div class="key-status {% if has_openai %}has-key{% else %}no-key{% endif %}">
+                        {% if has_openai %}✓ Key is set{% else %}✗ No key set{% endif %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="anthropic_api_key">Anthropic API Key</label>
+                    <input type="password" id="anthropic_api_key" name="anthropic_api_key" placeholder="Enter new Anthropic API key (leave empty to keep existing)" autocomplete="off">
+                    <div class="key-status {% if has_anthropic %}has-key{% else %}no-key{% endif %}">
+                        {% if has_anthropic %}✓ Key is set{% else %}✗ No key set{% endif %}
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn-save">Save API Keys</button>
+                    <a href="{{ url_for('index') }}" class="btn-cancel">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+

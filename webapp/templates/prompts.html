@@ -13,6 +13,7 @@
             <nav class="main-nav">
                 <a href="{{ url_for('index') }}" class="nav-link">← Back to Dashboard</a>
                 <a href="{{ url_for('portfolio_page') }}" class="nav-link">Portfolio Management →</a>
+                <a href="{{ url_for('api_keys_page') }}" class="nav-link">API Keys →</a>
             </nav>
         </header>
 
@@ -26,10 +27,37 @@
             <div class="prompts-layout">
                 <div class="prompt-column">
                     <label for="systemPrompt">System Prompt</label>
+                    <div class="prompt-description">
+                        <strong>What it's used for:</strong> This prompt sets the LLM's role and defines the evaluation framework. It instructs the LLM to act as an academic job-market advisor and specifies how to evaluate job fit and difficulty scores.
+                        <br><br>
+                        <strong>How to set it up:</strong> Define the LLM's role, evaluation criteria, scoring guidelines, and the expected JSON output format. The system prompt should include:
+                        <ul>
+                            <li>Role definition (e.g., "academic job-market advisor")</li>
+                            <li>Task description (evaluate fit and difficulty)</li>
+                            <li>Scoring benchmarks and guidelines</li>
+                            <li>Required JSON output structure</li>
+                        </ul>
+                        This prompt remains constant across all job evaluations and provides the foundational context for the LLM.
+                    </div>
                     <textarea id="systemPrompt" name="system_prompt" spellcheck="false">{{ system_prompt }}</textarea>
                 </div>
                 <div class="prompt-column">
                     <label for="userPrompt">User Prompt</label>
+                    <div class="prompt-description">
+                        <strong>What it's used for:</strong> This is a template prompt that gets filled with specific job and portfolio information for each evaluation. It provides the actual data the LLM will analyze.
+                        <br><br>
+                        <strong>How to set it up:</strong> Create a template with placeholders that will be replaced with real data. Available placeholders:
+                        <ul>
+                            <li><code>{portfolio_summary}</code> - Candidate's portfolio summary</li>
+                            <li><code>{job_title}</code> - Job title</li>
+                            <li><code>{institution}</code> - Institution name</li>
+                            <li><code>{position_type}</code> - Position type/level</li>
+                            <li><code>{location}</code> - Job location</li>
+                            <li><code>{description}</code> - Full job description</li>
+                            <li><code>{requirements}</code> - Key job requirements</li>
+                        </ul>
+                        The template should structure the information clearly and guide the LLM to return the JSON format specified in the system prompt.
+                    </div>
                     <textarea id="userPrompt" name="user_prompt" spellcheck="false">{{ user_prompt }}</textarea>
                 </div>
             </div>

@@ -2,6 +2,7 @@
 
 import logging
 import hashlib
+import json
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_file, redirect, url_for
 from werkzeug.utils import secure_filename
@@ -24,7 +25,7 @@ from processor import (
     classify_position_batch,
     normalize_level_labels,
 )
-from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE
+from config.settings import PORTFOLIO_PATH, LLM_MAX_CONCURRENCY, LLM_PROCESSING_BATCH_SIZE, SECRET_FILE
 from config.prompt_loader import get_prompts as load_prompts, save_prompts
 from matcher import (
     load_portfolio,
@@ -118,6 +119,87 @@ def prompts_page():
         user_prompt=prompts['user_prompt'],
         message=message,
         error=error,
+    )
+
+
+def _load_secrets() -> dict:
+    """Load secrets from secret.json if present."""
+    if not SECRET_FILE.exists():
+        return {}
+    try:
+        with SECRET_FILE.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_secrets(secrets: dict) -> bool:
+    """Save secrets to secret.json."""
+    try:
+        # Ensure the directory exists
+        SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with SECRET_FILE.open("w", encoding="utf-8") as fp:
+            json.dump(secrets, fp, indent=2)
+        return True
+    except (OSError, json.JSONEncodeError) as e:
+        logger.error(f"Failed to save secrets: {e}")
+        return False
+
+
+@app.route('/api-keys', methods=['GET', 'POST'])
+def api_keys_page():
+    """View and update LLM API keys."""
+    message = None
+    error = None
+    
+    # Check if keys exist (but never reveal them)
+    existing_secrets = _load_secrets()
+    has_deepseek = bool(existing_secrets.get('DEEPSEEK_API_KEY', ''))
+    has_openai = bool(existing_secrets.get('OPENAI_API_KEY', ''))
+    has_anthropic = bool(existing_secrets.get('ANTHROPIC_API_KEY', ''))
+    has_provider = bool(existing_secrets.get('LLM_PROVIDER', ''))
+
+    if request.method == 'POST':
+        # Get new values from form
+        deepseek_key = (request.form.get('deepseek_api_key') or '').strip()
+        openai_key = (request.form.get('openai_api_key') or '').strip()
+        anthropic_key = (request.form.get('anthropic_api_key') or '').strip()
+        provider = (request.form.get('llm_provider') or '').strip().lower()
+        
+        # Load existing secrets
+        secrets = _load_secrets()
+        
+        # Only update keys that were provided (non-empty)
+        if deepseek_key:
+            secrets['DEEPSEEK_API_KEY'] = deepseek_key
+        if openai_key:
+            secrets['OPENAI_API_KEY'] = openai_key
+        if anthropic_key:
+            secrets['ANTHROPIC_API_KEY'] = anthropic_key
+        if provider:
+            secrets['LLM_PROVIDER'] = provider
+        
+        # Save to secret.json
+        if _save_secrets(secrets):
+            message = 'API keys updated successfully.'
+            # Update status flags
+            has_deepseek = bool(secrets.get('DEEPSEEK_API_KEY', ''))
+            has_openai = bool(secrets.get('OPENAI_API_KEY', ''))
+            has_anthropic = bool(secrets.get('ANTHROPIC_API_KEY', ''))
+            has_provider = bool(secrets.get('LLM_PROVIDER', ''))
+        else:
+            error = 'Failed to save API keys. Please check file permissions.'
+
+    return render_template(
+        'api_keys.html',
+        message=message,
+        error=error,
+        has_deepseek=has_deepseek,
+        has_openai=has_openai,
+        has_anthropic=has_anthropic,
+        has_provider=has_provider,
+        current_provider=existing_secrets.get('LLM_PROVIDER', 'deepseek'),
     )
 
 
