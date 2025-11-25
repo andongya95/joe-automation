@@ -27,17 +27,20 @@ TRACK_OPTIONS = [
 POSITION_TRACK_SYSTEM_PROMPT = (
     "You are an expert academic career advisor. Review the job posting and assign it to"
     " one of the predefined categories. Use domain knowledge about economics job market"
-    " roles. Respond ONLY with JSON in the following shape:\n"
+    " roles. PRIORITIZE THE JOB TITLE when making your classification decision.\n\n"
+    "Respond ONLY with JSON in the following shape:\n"
     "{\n"
     "  \"track_label\": <one of: junior tenure-track, senior tenure-track, teaching, industry, non-tenure track, other academia>,\n"
     "  \"reasoning\": <short explanation>\n"
-    "}\n"
-    "Junior tenure-track generally means assistant-level or early-career tenure-track positions."
-    " Senior tenure-track implies associate/full rank or leadership roles. Teaching refers to"
-    " lecturer/instructor/teaching professor roles. Industry covers private-sector, consulting,"
-    " or non-academic employers. Non-tenure track covers research associate, visiting, postdoc,"
-    " adjunct, or contract academic positions. Other academia is a catch-all for remaining"
-    " academic roles (e.g., research centers) not fitting the earlier buckets."
+    "}\n\n"
+    "Category definitions:\n"
+    "- Junior tenure-track: Assistant-level or early-career tenure-track positions (e.g., Assistant Professor, Assistant Professor of Economics)\n"
+    "- Senior tenure-track: Associate/full rank or leadership roles (e.g., Associate Professor, Full Professor, Endowed Chair)\n"
+    "- Teaching: Lecturer/instructor/teaching professor roles focused primarily on teaching (e.g., Lecturer, Instructor, Teaching Professor)\n"
+    "- Industry: Private-sector, consulting, or non-academic employers (e.g., Research Economist at Federal Reserve, Consultant)\n"
+    "- Non-tenure track: Research associate, visiting, postdoc, pre-doc, adjunct, or contract academic positions (e.g., Postdoctoral Fellow, Predoctoral Research Assistant, Visiting Scholar)\n"
+    "- Other academia: Catch-all for remaining academic roles (e.g., research centers, policy institutes) not fitting the earlier buckets\n\n"
+    "When the job title indicates pre-doc or post-doc positions, classify them as 'non-tenure track'."
 )
 
 

@@ -10,12 +10,10 @@ from datetime import datetime
 
 from config.settings import (
     LLM_PROVIDER,
-    DEEPSEEK_API_KEY,
-    OPENAI_API_KEY,
-    ANTHROPIC_API_KEY,
     MODEL_NAME,
     LLM_MAX_CONCURRENCY,
     LLM_MIN_CALL_INTERVAL,
+    _get_secret,  # Import the function to reload API keys dynamically
 )
 from processor.level_normalizer import normalize_level_labels as _normalize_levels
 
@@ -66,13 +64,15 @@ def _call_deepseek(prompt: str, system_prompt: str = "") -> Optional[str]:
     try:
         from openai import OpenAI
         
-        if not DEEPSEEK_API_KEY:
+        # Reload API key dynamically to pick up changes from web UI
+        api_key = _get_secret("DEEPSEEK_API_KEY", "")
+        if not api_key:
             logger.error("DeepSeek API key not configured")
             return None
         
         _rate_limit()
         client = OpenAI(
-            api_key=DEEPSEEK_API_KEY,
+            api_key=api_key,
             base_url="https://api.deepseek.com"
         )
         
@@ -98,12 +98,14 @@ def _call_openai(prompt: str, system_prompt: str = "") -> Optional[str]:
     try:
         from openai import OpenAI
         
-        if not OPENAI_API_KEY:
+        # Reload API key dynamically to pick up changes from web UI
+        api_key = _get_secret("OPENAI_API_KEY", "")
+        if not api_key:
             logger.error("OpenAI API key not configured")
             return None
         
         _rate_limit()
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=api_key)
         
         messages = []
         if system_prompt:
@@ -128,12 +130,14 @@ def _call_anthropic(prompt: str, system_prompt: str = "") -> Optional[str]:
     try:
         import anthropic
         
-        if not ANTHROPIC_API_KEY:
+        # Reload API key dynamically to pick up changes from web UI
+        api_key = _get_secret("ANTHROPIC_API_KEY", "")
+        if not api_key:
             logger.error("Anthropic API key not configured")
             return None
         
         _rate_limit()
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = anthropic.Anthropic(api_key=api_key)
         
         system_msg = system_prompt if system_prompt else "You are a helpful assistant."
         
@@ -153,8 +157,12 @@ def _call_anthropic(prompt: str, system_prompt: str = "") -> Optional[str]:
 
 
 def _call_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
-    """Call the configured LLM provider."""
-    provider = LLM_PROVIDER.lower()
+    """Call the configured LLM provider.
+    
+    Reloads provider and API keys dynamically to pick up changes from web UI.
+    """
+    # Reload provider dynamically to pick up changes from web UI
+    provider = _get_secret("LLM_PROVIDER", "deepseek").lower()
     
     if provider == "deepseek":
         return _call_deepseek(prompt, system_prompt)
