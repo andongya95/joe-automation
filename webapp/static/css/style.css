@@ -1276,3 +1276,110 @@ td.loading {
     flex-wrap: wrap;
 }
 
+
+/* Welcome Message (First-time user) */
+.welcome-message {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 0;
+    margin-bottom: 30px;
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+    position: relative;
+    animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.welcome-content {
+    padding: 30px;
+    color: white;
+    position: relative;
+}
+
+.welcome-icon {
+    font-size: 3em;
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.welcome-text {
+    text-align: left;
+}
+
+.welcome-text h2 {
+    margin: 0 0 15px 0;
+    font-size: 1.8em;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.welcome-text p {
+    margin: 12px 0;
+    line-height: 1.6;
+    font-size: 1.05em;
+}
+
+.welcome-text ol {
+    margin: 15px 0 15px 25px;
+    padding-left: 0;
+}
+
+.welcome-text li {
+    margin: 10px 0;
+    line-height: 1.6;
+}
+
+.welcome-text strong {
+    font-weight: 600;
+    color: #fff;
+}
+
+.welcome-note {
+    background: rgba(255, 255, 255, 0.15);
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+    border-left: 4px solid #ffd700;
+}
+
+.welcome-note a {
+    color: #ffd700;
+    text-decoration: underline;
+    font-weight: 600;
+}
+
+.welcome-note a:hover {
+    color: #fff;
+}
+
+.welcome-close {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    font-size: 24px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    line-height: 1;
+}
+
+.welcome-close:hover {
+    background: rgba(255, 255, 255, 0.3);
+}

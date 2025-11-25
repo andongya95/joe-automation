@@ -83,7 +83,19 @@ def _job_needs_fit_recompute(job: Dict[str, Any], portfolio_hash: str) -> bool:
 @app.route('/')
 def index():
     """Render the main page."""
-    return render_template('index.html')
+    # Check if database is empty (first-time user)
+    try:
+        all_jobs = get_all_jobs()
+        is_empty = len(all_jobs) == 0
+    except Exception:
+        # If database doesn't exist or error, initialize it and mark as empty
+        try:
+            init_database()
+            is_empty = True
+        except Exception:
+            is_empty = False  # If init fails, don't show message
+    
+    return render_template('index.html', is_empty=is_empty)
 
 
 @app.route('/portfolio')

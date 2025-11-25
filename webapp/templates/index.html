@@ -39,6 +39,26 @@
             </div>
         </header>
 
+        {% if is_empty %}
+        <div class="welcome-message" id="welcomeMessage">
+            <div class="welcome-content">
+                <div class="welcome-icon">👋</div>
+                <div class="welcome-text">
+                    <h2>Welcome to AEA JOE Automation!</h2>
+                    <p>It looks like this is your first time using the application. To get started, you need to scrape job postings from the AEA JOE website.</p>
+                    <p><strong>Next steps:</strong></p>
+                    <ol>
+                        <li>Click the <strong>"Scrape New Jobs"</strong> button below to download job postings from AEA JOE</li>
+                        <li>Wait for the scraping to complete (this may take a few minutes)</li>
+                        <li>Once jobs are loaded, you can process them with LLM to extract details and match them with your portfolio</li>
+                    </ol>
+                    <p class="welcome-note">💡 <strong>Tip:</strong> Make sure you have configured your LLM API keys in the <a href="{{ url_for('api_keys_page') }}">API Keys</a> page before processing jobs.</p>
+                </div>
+                <button class="welcome-close" onclick="document.getElementById('welcomeMessage').style.display='none'">×</button>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="controls">
             <div class="filters">
                 <div class="filter-group">
