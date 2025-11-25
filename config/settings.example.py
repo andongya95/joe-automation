@@ -36,12 +36,64 @@ def _load_secrets() -> dict:
         return {}
 
 
-_SECRETS = _load_secrets()
+# Cache secrets with file modification time to avoid reloading on every call
+_secrets_cache: dict = {}
+_secrets_mtime: float = 0
+_secrets_size: int = 0
+
+
+def _reload_secrets_cache():
+    """Force reload secrets from disk, updating cache."""
+    global _secrets_cache, _secrets_mtime, _secrets_size
+    try:
+        if SECRET_FILE.exists():
+            _secrets_cache = _load_secrets()
+            stat = SECRET_FILE.stat()
+            _secrets_mtime = stat.st_mtime
+            _secrets_size = stat.st_size
+        else:
+            _secrets_cache = {}
+            _secrets_mtime = 0
+            _secrets_size = 0
+    except OSError:
+        _secrets_cache = {}
 
 
 def _get_secret(key: str, default: str = "") -> str:
-    """Read value from env first, then fall back to secret.json."""
-    return os.getenv(key) or _SECRETS.get(key, default) or default
+    """Read value from env first, then fall back to secret.json.
+    
+    Reloads secrets from disk if the file has been modified since last load.
+    This allows API keys to be updated via the web UI without restarting the app.
+    """
+    # Check environment variable first (highest priority)
+    env_value = os.getenv(key)
+    if env_value:
+        return env_value
+    
+    # Reload secrets if file has been modified (check both mtime and size for reliability)
+    global _secrets_cache, _secrets_mtime, _secrets_size
+    try:
+        if SECRET_FILE.exists():
+            stat = SECRET_FILE.stat()
+            current_mtime = stat.st_mtime
+            current_size = stat.st_size
+            # Reload if mtime or size changed (more reliable than just mtime)
+            # Also reload if cache is empty (first call)
+            if (current_mtime != _secrets_mtime or 
+                current_size != _secrets_size or 
+                not _secrets_cache):
+                _reload_secrets_cache()
+        else:
+            # File was deleted, clear cache
+            if _secrets_cache:
+                _secrets_cache = {}
+                _secrets_mtime = 0
+                _secrets_size = 0
+    except OSError:
+        # If we can't check file, try to reload anyway
+        _reload_secrets_cache()
+    
+    return _secrets_cache.get(key, default) or default
 
 # Database settings
 DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "data" / "job_listings.db"))
