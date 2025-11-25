@@ -81,6 +81,22 @@
         .btn-cancel:hover {
             background-color: #545b62;
         }
+        .btn-test {
+            background-color: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-test:hover:not(:disabled) {
+            background-color: #218838;
+        }
+        .btn-test:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
         .help-text {
             font-size: 12px;
             color: #666;
@@ -147,11 +163,55 @@
 
                 <div class="form-actions">
                     <button type="submit" class="btn-save">Save API Keys</button>
+                    <button type="button" id="testConnectionBtn" class="btn-test">Test Connection</button>
                     <a href="{{ url_for('index') }}" class="btn-cancel">Cancel</a>
                 </div>
             </form>
+            
+            <div id="testResult" style="display: none; margin-top: 20px; padding: 15px; border-radius: 6px;"></div>
         </div>
     </div>
+    
+    <script>
+        document.getElementById('testConnectionBtn').addEventListener('click', async function() {
+            const btn = this;
+            const resultDiv = document.getElementById('testResult');
+            const provider = document.getElementById('llm_provider').value;
+            
+            // Disable button and show loading
+            btn.disabled = true;
+            btn.textContent = 'Testing...';
+            resultDiv.style.display = 'block';
+            resultDiv.className = '';
+            resultDiv.innerHTML = '<p>Testing API connection with saved keys...</p>';
+            
+            try {
+                const response = await fetch('/api/test-connection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ provider: provider })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'alert alert-success';
+                    resultDiv.innerHTML = `<strong>✓ Connection Successful!</strong><br>${data.message || 'API key is valid and working.'}`;
+                } else {
+                    resultDiv.className = 'alert alert-error';
+                    resultDiv.innerHTML = `<strong>✗ Connection Failed</strong><br>${data.message || 'Unable to connect. Please check your API key.'}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'alert alert-error';
+                resultDiv.innerHTML = `<strong>✗ Error</strong><br>Failed to test connection: ${error.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Test Connection';
+            }
+        });
+    </script>
 </body>
 </html>
 

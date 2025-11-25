@@ -147,12 +147,24 @@ def _load_secrets() -> dict:
 
 
 def _save_secrets(secrets: dict) -> bool:
-    """Save secrets to secret.json."""
+    """Save secrets to secret.json and force reload in settings module."""
     try:
         # Ensure the directory exists
         SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
         with SECRET_FILE.open("w", encoding="utf-8") as fp:
             json.dump(secrets, fp, indent=2)
+        
+        # Force reload in settings module to pick up changes immediately
+        try:
+            # Import the settings module and force reload
+            import config.settings as settings_module
+            if hasattr(settings_module, '_reload_secrets_cache'):
+                settings_module._reload_secrets_cache()
+                logger.info("Forced reload of secrets cache after API key update")
+        except Exception as reload_error:
+            # Non-critical - cache will reload on next _get_secret call
+            logger.warning(f"Could not force reload secrets cache: {reload_error}")
+        
         return True
     except (OSError, json.JSONEncodeError) as e:
         logger.error(f"Failed to save secrets: {e}")
@@ -213,6 +225,99 @@ def api_keys_page():
         has_provider=has_provider,
         current_provider=existing_secrets.get('LLM_PROVIDER', 'deepseek'),
     )
+
+
+@app.route('/api/test-connection', methods=['POST'])
+def api_test_connection():
+    """Test API connection with the configured provider using saved API keys."""
+    try:
+        data = request.get_json() or {}
+        provider = data.get('provider', '').lower().strip()
+        
+        if not provider:
+            # Get provider from settings
+            from config.settings import _get_secret
+            provider = _get_secret("LLM_PROVIDER", "deepseek").lower()
+        
+        # Force reload secrets to get latest saved keys
+        from config.settings import _get_secret, _reload_secrets_cache
+        _reload_secrets_cache()
+        
+        # Get the API key for the selected provider
+        if provider == "deepseek":
+            api_key = _get_secret("DEEPSEEK_API_KEY", "")
+        elif provider == "openai":
+            api_key = _get_secret("OPENAI_API_KEY", "")
+        elif provider == "anthropic":
+            api_key = _get_secret("ANTHROPIC_API_KEY", "")
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Unknown provider: {provider}'
+            }), 400
+        
+        if not api_key:
+            return jsonify({
+                'success': False,
+                'message': f'No API key found for {provider.capitalize()}. Please save an API key first.'
+            }), 400
+        
+        # Import LLM functions
+        from processor.llm_parser import _call_deepseek, _call_openai, _call_anthropic
+        
+        # Make a simple test call
+        test_prompt = "Respond with only the word 'success' if you can read this."
+        test_system = "You are a test assistant. Respond with only the word 'success'."
+        
+        response = None
+        error_message = None
+        
+        try:
+            if provider == "deepseek":
+                response = _call_deepseek(test_prompt, test_system)
+            elif provider == "openai":
+                response = _call_openai(test_prompt, test_system)
+            elif provider == "anthropic":
+                response = _call_anthropic(test_prompt, test_system)
+        except Exception as e:
+            error_message = str(e)
+            logger.error(f"API test error for {provider}: {e}")
+        
+        if response and ('success' in response.lower() or len(response.strip()) > 0):
+            return jsonify({
+                'success': True,
+                'message': f'Successfully connected to {provider.capitalize()} API. Response received.'
+            })
+        elif error_message:
+            # Check for common error patterns
+            error_lower = error_message.lower()
+            if 'api key' in error_lower or 'authentication' in error_lower or '401' in error_message:
+                return jsonify({
+                    'success': False,
+                    'message': f'Authentication failed. Please check your {provider.capitalize()} API key.'
+                })
+            elif 'rate limit' in error_lower or '429' in error_message:
+                return jsonify({
+                    'success': False,
+                    'message': 'Rate limit exceeded. Please try again later.'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': f'Connection error: {error_message[:200]}'  # Limit error message length
+                })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'No response from {provider.capitalize()} API. Please check your API key and network connection.'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error testing API connection: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error testing connection: {str(e)[:200]}'
+        }), 500
 
 
 @app.route('/api/jobs', methods=['GET'])
