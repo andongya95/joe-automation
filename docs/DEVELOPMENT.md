@@ -497,28 +497,26 @@ Return only the JSON structure specified in the system prompt.
 
 ### Settings File (`config/settings.py`)
 
-```python
-import os
+The settings file uses helper functions for secret management and environment variable parsing. See `config/settings.example.py` for the complete template.
 
-# Database settings
-DATABASE_PATH = os.getenv("DATABASE_PATH", "data/job_listings.db")
+**Key Settings:**
+- `DATABASE_PATH`: Path to SQLite database (default: `data/job_listings.db`)
+- `LLM_PROVIDER`: LLM provider ("deepseek", "openai", or "anthropic")
+- `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`: API keys (from env vars or `secret.json`)
+- `MODEL_NAME`: Model name to use (default: "deepseek-chat")
+- `LLM_MAX_CONCURRENCY`: Maximum concurrent LLM calls (default: 20)
+- `LLM_MIN_CALL_INTERVAL`: Minimum seconds between LLM calls (default: 1.0)
+- `LLM_PROCESSING_BATCH_SIZE`: Jobs per batch (default: 20)
+- `SCRAPE_INTERVAL_HOURS`: Scraping interval (default: 6)
+- `JOE_EXPORT_URL`: AEA JOE export URL
+- `PORTFOLIO_PATH`: Path to portfolio directory (default: `portfolio/`)
+- `RESEARCH_FOCAL_AREAS`: List of research areas for matching
+- `LOG_LEVEL`: Logging level (default: "INFO")
+- `VERBOSE`: Enable verbose logging (default: false)
 
-# LLM settings
-LLM_PROVIDER = "deepseek"  # or "anthropic", "openai"
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-LLM_MAX_CONCURRENCY = int(os.getenv("LLM_MAX_CONCURRENCY", "20"))
-LLM_MIN_CALL_INTERVAL = float(os.getenv("LLM_MIN_CALL_INTERVAL", "1.0"))
-LLM_PROCESSING_BATCH_SIZE = int(os.getenv("LLM_PROCESSING_BATCH_SIZE", "20"))
-
-# Scraping settings
-SCRAPE_INTERVAL_HOURS = 6
-JOE_EXPORT_URL = "https://www.aeaweb.org/joe/resultset_xls_output.php?mode=xls_xml"
-
-# Portfolio settings
-PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", "portfolio/")
-```
+**Secret Management:**
+- API keys can be provided via environment variables or `config/secret.json`
+- The `_get_secret()` helper checks environment variables first, then falls back to `secret.json`
 
 ### Environment Variables
 

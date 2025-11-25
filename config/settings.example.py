@@ -93,10 +93,13 @@ JOE_EXPORT_URL = os.getenv(
 PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", str(BASE_DIR / "portfolio"))
 
 # Matching criteria
+# List your research areas/focus areas for portfolio matching
+# These are used to calculate fit scores based on alignment with job requirements
 RESEARCH_FOCAL_AREAS = [
-    "public economics",
-    "development economics",
-    "microeconomics",
+    # Example entries (uncomment and modify as needed):
+    # "labor economics",
+    # "applied econometrics",
+    # "environmental economics",
     # Add your research areas here
 ]
 
